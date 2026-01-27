@@ -1,5 +1,41 @@
 # Changelog
 
+## [8.8.1] - 2026-01-26
+
+### Fixed
+
+(plugin-network-breadcrumbs, plugin-network-instrumentation) Ensure XMLHttpRequest response types are handled gracefully [#2660](https://github.com/bugsnag/bugsnag-js/pull/2660)
+
+## [8.8.0] - 2026-01-20
+
+This release adds support for notitfying failed network requests using the new `plugin-network-instrumentation` package
+
+### Added
+
+(plugin-network-instrumentation) Add new plugin to notify failed network requests [#2647](https://github.com/bugsnag/bugsnag-js/pull/2647)
+(plugin-cloudflare-workers): Add initial support for Cloudflare Workers [#2643](https://github.com/bugsnag/bugsnag-js/pull/2643) [#2644](https://github.com/bugsnag/bugsnag-js/pull/2644)
+(plugin-contextualize) Return callback value from contextualize plugin [#2654](https://github.com/bugsnag/bugsnag-js/pull/2654)
+
+### Fixed
+
+(plugin-server-session) Delay session tracker initialization until first use [#2642](https://github.com/bugsnag/bugsnag-js/pull/2642)
+
+### Dependencies
+
+Update bugsnag-cocoa to [6.34.1](https//github.com/bugsnag/bugsnag-cocoa/releases/tag/6.34.1) [#2606](https://github.com/bugsnag/bugsnag-js/pull/2606)
+Update bugsnag-android to [v6.20.0](https//github.com/bugsnag/bugsnag-android/releases/tag/v6.20.0) [#2625](https://github.com/bugsnag/bugsnag-js/pull/2625)
+
+## [8.7.0] - 2025-10-13
+
+### Added
+
+- (electron) Add `codeBundleId` config option to main process  [#2577](https://github.com/bugsnag/bugsnag-js/pull/2577)
+
+### Changed
+
+- Update bugsnag-cocoa to [v6.34.0](https//github.com/bugsnag/bugsnag-cocoa/releases/tag/v6.34.0) [#2571](https://github.com/bugsnag/bugsnag-js/pull/2571)
+- Amend secondary default notify and sessions endpoints to `bugsnag.smartbear.com` [#2584](https://github.com/bugsnag/bugsnag-js/pull/2584)
+
 ## [8.6.0] - 2025-09-25
 
 ### Added
@@ -12,6 +48,7 @@
 
 - Update bugsnag-cocoa to [v6.33.1](https//github.com/bugsnag/bugsnag-cocoa/releases/tag/v6.33.1) [#2552](https://github.com/bugsnag/bugsnag-js/pull/2552)
 - Update bugsnag-android to [v6.18.0](https//github.com/bugsnag/bugsnag-android/releases/tag/v6.18.0) [#2556](https://github.com/bugsnag/bugsnag-js/pull/2556)
+- (core): Change `startsWith()` to `indexOf() === 0` to support older browsers [#2568](https://github.com/bugsnag/bugsnag-js/pull/2568)
 
 ### Fixed
 
