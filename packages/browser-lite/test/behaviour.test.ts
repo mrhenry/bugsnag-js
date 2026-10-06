@@ -55,6 +55,15 @@ function start (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, capture
   return { Bugsnag, captured }
 }
 
+// a client created without touching the static singleton, as an embedding
+// application would do
+function createClient (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, client: any, captured: Captured[] } {
+  const captured = mockDelivery()
+  const Bugsnag = getBugsnag()
+  const client = Bugsnag.createClient({ apiKey: API_KEY, sendPayloadChecksums: false, ...opts })
+  return { Bugsnag, client, captured }
+}
+
 function firstEvent (captured: Captured[]): any {
   return captured[captured.length - 1].body.events[0]
 }
@@ -90,6 +99,7 @@ describe('browser-lite behaviour', () => {
     rejectionListeners.forEach(fn => window.removeEventListener('unhandledrejection', fn))
     window.addEventListener = originalAddEventListener
     ;(window as any).onerror = null
+    delete (window as any).bugsnagClient
     Object.assign(console, realConsole)
     window.history.replaceState({}, '', '/')
   })
@@ -160,6 +170,52 @@ describe('browser-lite behaviour', () => {
     })
   })
 
+  describe('bootstrap and event enrichment', () => {
+    it('creates a client with createClient without starting the singleton', () => {
+      const { Bugsnag, client, captured } = createClient()
+      expect(Bugsnag.isStarted()).toBe(false)
+      client.notify(new Error('x'))
+      expect(captured).toHaveLength(1)
+    })
+
+    it('can be exposed as a window global and used to report', () => {
+      const { client, captured } = createClient()
+      ;(window as any).bugsnagClient = client
+      ;(window as any).bugsnagClient.notify(new Error('x'))
+      expect(captured).toHaveLength(1)
+    })
+
+    it('enriches events in an onError callback', () => {
+      const { client, captured } = createClient({
+        appType: 'example-app',
+        releaseStage: 'production',
+        enabledReleaseStages: ['production', 'staging'],
+        onError: (event: any) => {
+          event.context = event.context + ' - example-app'
+          event.addMetadata('site', { id: 'site-1', app: 'example-app' })
+          event.addMetadata('bundle', { target: 'modern' })
+        }
+      })
+      client.notify(new Error('[checkout] API Error: 500'))
+      const event = firstEvent(captured)
+      expect(event.app.type).toBe('example-app')
+      expect(event.context).toBe('/ - example-app')
+      expect(event.metaData.site).toStrictEqual({ id: 'site-1', app: 'example-app' })
+      expect(event.metaData.bundle).toStrictEqual({ target: 'modern' })
+    })
+
+    it('leaves events untouched when enrichment values are absent', () => {
+      const { client, captured } = createClient({
+        onError: (event: any) => {
+          const app: string | undefined = undefined
+          if (app) event.context = event.context + ' - ' + app
+        }
+      })
+      client.notify(new Error('x'))
+      expect(firstEvent(captured).context).toBe('/')
+    })
+  })
+
   describe('manual reporting', () => {
     it('reports handled errors with warning severity', () => {
       const { Bugsnag, captured } = start()
@@ -209,6 +265,15 @@ describe('browser-lite behaviour', () => {
       const { Bugsnag } = start({ onSession })
       Bugsnag.notify(new Error('x'))
       expect(onSession).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('metadata', () => {
+    it('attaches client metadata to subsequent reports', () => {
+      const { client, captured } = createClient()
+      client.addMetadata('checkout', { cartId: 'c-1' })
+      client.notify(new Error('x'))
+      expect(firstEvent(captured).metaData.checkout).toStrictEqual({ cartId: 'c-1' })
     })
   })
 
@@ -350,6 +415,15 @@ describe('browser-lite behaviour', () => {
       expect(event.user.id).toBeUndefined()
       expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
     })
+
+    it('accepts and ignores legacy privacy options', () => {
+      const { client, captured } = createClient({ generateAnonymousId: true, collectUserIp: false })
+      client.notify(new Error('x'))
+      const event = firstEvent(captured)
+      expect(event.device.id).toBeUndefined()
+      expect(event.user.id).toBeUndefined()
+      expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
+    })
   })
 
   describe('throttling', () => {
@@ -390,6 +464,17 @@ describe('browser-lite behaviour', () => {
     it('does not send when the releaseStage is not enabled', () => {
       const { Bugsnag, captured } = start({ releaseStage: 'production', enabledReleaseStages: ['staging'] })
       Bugsnag.notify(new Error('x'))
+      expect(captured).toHaveLength(0)
+    })
+
+    it('sends in each enabled release stage and skips disabled ones', () => {
+      for (const stage of ['production', 'staging']) {
+        const { client, captured } = createClient({ releaseStage: stage, enabledReleaseStages: ['production', 'staging'] })
+        client.notify(new Error('x'))
+        expect(captured).toHaveLength(1)
+      }
+      const { client, captured } = createClient({ releaseStage: 'development', enabledReleaseStages: ['production', 'staging'] })
+      client.notify(new Error('x'))
       expect(captured).toHaveLength(0)
     })
 

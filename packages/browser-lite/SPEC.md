@@ -479,17 +479,37 @@ mocked `XMLHttpRequest` and the jsdom environment
 - `test/index.test.ts` — the package's baseline suite (startup, notify, plugin
   registration, config validation, payload checksums, session API absence).
 - `test/behaviour.test.ts` — behaviour driven by the stated intent and by
-  coverage gaps: automatic capture (`onerror`, `unhandledrejection`, CORS,
-  `autoDetectErrors`, `enabledErrorTypes`), manual reporting and callbacks,
-  breadcrumbs (manual, console, `maxBreadcrumbs`, `enabledBreadcrumbTypes`),
+  coverage gaps: bootstrap and event enrichment (creating a client without
+  starting the singleton, exposing it as a global, `onError` enrichment),
+  automatic capture (`onerror`, `unhandledrejection`, CORS, `autoDetectErrors`,
+  `enabledErrorTypes`), manual reporting and callbacks, metadata, breadcrumbs
+  (manual, console, `maxBreadcrumbs`, `enabledBreadcrumbTypes`),
   context/request/page, timing, device/browser (including window size and the
   absence of an anonymous id), throttling, delivery/payload (endpoints,
   redaction, release stages), and configuration defaults.
 - `test/device.test.ts` — unit tests for the inline device plugin (orientation
   sources, window size, locale fallback chain).
+- `test/bundle-lib.test.ts`, `test/bundle-client.test.ts`,
+  `test/bundle-event.test.ts`, `test/bundle-plugins.test.ts`,
+  `test/bundle-delivery.test.ts` — direct tests for every first-party module that
+  ends up in the bundle (core lib, client, event, config, each plugin, delivery).
 
-`packages/browser-lite/src` is currently at **100% statement, branch, function
-and line coverage** across 57 tests.
+### 15.1 Bundle coverage
+
+`jest.coverage.config.js` instruments every first-party module that the browser
+bundle contains and runs only the browser-lite tests. Run it with:
+
+```
+npx jest --config packages/browser-lite/jest.coverage.config.js --coverage
+```
+
+Current bundle coverage: **~97% statements, ~91% branches, ~98% functions, ~98%
+lines** across ~190 tests. `packages/browser-lite/src` itself is at 100% for all
+metrics.
+
+The one knowingly-unreachable region is `core/lib/es-utils/keys.js` lines 18–21:
+the legacy "dontEnum bug" shim for old IE. Its guard is `false` in every modern
+engine, so the loop cannot execute; it caps that file at 60% statements.
 
 Notes for writing tests here:
 
@@ -502,3 +522,56 @@ Notes for writing tests here:
   `afterEach` in `test/behaviour.test.ts`).
 - The default logger prefixes every message with `[bugsnag]`, so log assertions
   match on `('[bugsnag]', expect.stringContaining(...))`.
+
+## 16. Consumer integration
+
+`test/behaviour.test.ts` pins the way an embedding application integrates the
+package, which is representative of production usage:
+
+### 16.1 Integration contract
+
+- A shared wrapper creates the client with `createClient({...})` at module
+  evaluation time and exposes it (for example as a window global). It does
+  **not** call `start`, so `isStarted()` stays `false` and callers use the
+  returned client rather than the delegated static methods.
+- Application code never imports `@bugsnag/*` or the package's internals
+  directly; it goes through the wrapper or the exposed client.
+- The client is bundled into the application's own JavaScript; there is no CDN
+  load at runtime.
+
+### 16.2 Config used by the wrapper
+
+A small set of options: `apiKey`, `appType`, an `enabledReleaseStages`
+allow-list, `releaseStage`, and an `onError` callback. `endpoints`,
+`appVersion`, `maxBreadcrumbs`, `redactedKeys`, plugins, and user/metadata are
+left at their defaults.
+
+### 16.3 `onError` enrichment
+
+The callback appends a suffix to `event.context` and adds metadata sections
+(for example `site: { id, app }` and `bundle: { target }`), guarding against
+absent values.
+
+### 16.4 API surface used by applications
+
+- `client.notify(err)` — always a single `Error` argument.
+- `client.addMetadata(section, {...})` — attaching flow identifiers that persist
+  onto later reports.
+- No breadcrumbs, user, context, feature flags, sessions, plugins, or callbacks
+  are used from application code.
+- Most consumers never call the API at all and rely entirely on the automatic
+  `window.onerror` / `unhandledrejection` capture.
+
+### 16.5 Legacy options
+
+An earlier published build had `generateAnonymousId` active (a persistent
+`localStorage` id used as `user.id`), while `collectUserIp` and
+`autoTrackSessions` were inert. In this fork those options are ignored: no
+anonymous id, no `localStorage` write, no `user.id`, and no sessions. The tests
+assert that the legacy options are accepted and ignored.
+
+### 16.6 Out of scope (server-side)
+
+Any server-side emission of the config values (API key, release stage, app
+identity) and CSP allow-listing are outside the client behaviour described here.
+No `appVersion`, `codeBundleId`, or source-map upload is configured.
