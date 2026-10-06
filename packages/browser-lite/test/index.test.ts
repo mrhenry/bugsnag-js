@@ -168,10 +168,7 @@ describe('browser notifier', () => {
       },
       logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
       redactedKeys: ['foo', /bar/],
-      collectUserIp: true,
       maxEvents: 10,
-      generateAnonymousId: false,
-      trackInlineScripts: true,
       reportUnhandledPromiseRejectionsAsHandled: true,
       sendPayloadChecksums: true
     }

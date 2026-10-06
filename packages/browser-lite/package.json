@@ -32,7 +32,6 @@
   "devDependencies": {
     "@bugsnag/delivery-xml-http-request": "^9.0.0",
     "@bugsnag/plugin-browser-context": "^9.0.0",
-    "@bugsnag/plugin-browser-device": "^9.0.0",
     "@bugsnag/plugin-browser-request": "^9.0.0",
     "@bugsnag/plugin-console-breadcrumbs": "^9.0.0",
     "@bugsnag/plugin-simple-throttle": "^9.0.0",
