@@ -1,4 +1,4 @@
-import type BugsnagBrowserStatic from '../src/bugsnag'
+import type * as BugsnagBrowserStatic from '../src/bugsnag'
 
 const DONE = window.XMLHttpRequest.DONE
 const API_KEY = '030bab153e7c2349be364d23b5ae93b5'

@@ -1,4 +1,4 @@
-import BugsnagBrowserStatic, { BrowserConfig } from '../src/bugsnag'
+import type * as BugsnagBrowserStatic from '../src/bugsnag'
 
 const DONE = window.XMLHttpRequest.DONE
 
@@ -85,7 +85,7 @@ describe('browser notifier', () => {
   it('accepts all supported config options', () => {
     const Bugsnag = getBugsnag()
 
-    const completeConfig: Required<BrowserConfig> = {
+    const completeConfig: Required<BugsnagBrowserStatic.BrowserConfig> = {
       apiKey: API_KEY,
       appType: 'worker',
       onError: [

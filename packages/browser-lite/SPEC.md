@@ -43,33 +43,37 @@ JavaScript.
 
 ```
 packages/browser-lite/
-  src/bugsnag.js       the whole notifier (single self-contained file)
+  src/bugsnag.js       the whole notifier (single ES module, named exports)
   src/bugsnag.d.ts     type re-export
   types/bugsnag.d.ts   public type surface
-  types/global.d.ts    UMD global declaration
   test/                behaviour tests
   dist/                built bundle (git-ignored)
 ```
 
-- `main`: `dist/bugsnag.js` (unminified bundle)
+- `main` / `module`: `dist/bugsnag.js` (unminified ES module)
 - `types`: `types/bugsnag.d.ts`
-- Build (`build.js`): the source is already a self-contained ES3 UMD bundle, so
-  the build only substitutes `__VERSION__` with the package version and then
-  minifies with uglify (`--compress passes=3 --mangle --ie8`). No bundling,
-  transpilation or runtime/helper injection happens.
+- Build (`build.js`): the source is already a self-contained ES module, so the
+  build only substitutes `__VERSION__` with the package version and then
+  minifies with uglify (`--compress passes=3 --mangle toplevel --ie8`). No
+  bundling, wrapping or transpilation happens and no runtime/helper bloat is
+  introduced.
 - `bin/size` reports the **gzipped** size of `dist/bugsnag.min.js`.
-- The bundle exposes a UMD global named `Bugsnag`.
+- There is no UMD/AMD wrapper and nothing is attached to `window`.
 
 ## 3. Public API
 
-`require('@mrhenry/browser-lite')` returns a static object (the UMD global
-`Bugsnag`). It has a `default` property that points at itself for ESM interop.
+`@mrhenry/browser-lite` is an ES module. Its public API is a single named
+export, `createClient`. There is no default export and no global.
 
-### 3.1 Static methods
+```js
+import { createClient } from '@mrhenry/browser-lite'
+```
 
-| Method | Behaviour |
+### 3.1 Named exports
+
+| Export | Behaviour |
 | --- | --- |
-| `Bugsnag.createClient(apiKeyOrOpts)` | Creates and returns a new client. A string argument is treated as `{ apiKey }`; a missing argument as `{}`. |
+| `createClient(apiKeyOrOpts)` | Creates and returns a new client. A string argument is treated as `{ apiKey }`; a missing argument as `{}`. |
 
 There is no `start()`, no `isStarted()`, and no singleton `_client`. Every
 client is created explicitly with `createClient`.
@@ -180,7 +184,7 @@ include the current `releaseStage`, the event is dropped with a warning.
 
 ## 7. Manual reporting (`notify`)
 
-`Bugsnag.notify(maybeError)`.
+`client.notify(maybeError)`.
 
 - `maybeError` is used directly when it is an `Error`; anything else is coerced
   to an `Error` whose message is `String(maybeError)`.

@@ -7,8 +7,10 @@
  *   1. substitute `__VERSION__` with the package version
  *   2. minify
  *
- * The source file is already a self-contained, ES3, UMD bundle, so there is no
- * bundling or transpilation step and no runtime/helper bloat is introduced.
+ * The source is an ES module with named exports, so there is no bundling,
+ * wrapping or transpilation step and no runtime/helper bloat is introduced.
+ * The minifier is told to mangle top-level identifiers (the internals) while
+ * preserving the exported names.
  */
 
 const { readFileSync, writeFileSync } = require('fs')
@@ -29,7 +31,7 @@ if (!min) {
   const uglify = join(dir, '../../node_modules/.bin/uglifyjs')
   execFileSync(uglify, [
     '--compress', 'passes=3',
-    '--mangle',
+    '--mangle', 'toplevel',
     '--ie8',
     '--source-map', 'filename=bugsnag.js,url=bugsnag.min.js.map,includeSources',
     '--output', out
