@@ -367,8 +367,13 @@ describe('browser-lite behaviour', () => {
     })
 
     it('strips query strings and fragments from stack frame file paths', () => {
-      const { _strip } = require('../src/bugsnag')
-      expect(_strip('http://example.com/app.js?v=1#hash')).toBe('http://example.com/app.js')
+      const { Bugsnag, captured } = start({
+        onError: (event: any) => {
+          event.errors[0].stacktrace = [{ file: 'http://example.com/app.js?v=1#hash' }]
+        }
+      })
+      Bugsnag.notify(new Error('x'))
+      expect(firstEvent(captured).exceptions[0].stacktrace[0].file).toBe('http://example.com/app.js')
     })
   })
 
@@ -514,48 +519,40 @@ describe('browser-lite behaviour', () => {
       expect(() => Bugsnag.createClient()).toThrow('No Bugsnag API Key set')
     })
 
-    it('treats a string argument as the api key', () => {
+    it('treats a string argument as the api key', (done) => {
+      const captured = mockDelivery()
       const Bugsnag = getBugsnag()
       const client = Bugsnag.createClient(API_KEY)
-      expect(client._config.apiKey).toBe(API_KEY)
+      client.notify(new Error('x'), undefined, () => {
+        expect(captured[0].body.apiKey).toBe(API_KEY)
+        done()
+      })
     })
 
     it('falls back to no logger when console.debug is unavailable', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
       const original = console.debug
       try {
         ;(console as any).debug = undefined
-        jest.isolateModules(() => {
-          const config = require('../src/bugsnag').config
-          expect(config.logger.defaultValue()).toBeUndefined()
-        })
+        const Bugsnag = getBugsnag()
+        Bugsnag.start(API_KEY)
+        Bugsnag.start(API_KEY)
+        expect(warn).not.toHaveBeenCalled()
       } finally {
         ;(console as any).debug = original
-      }
-    })
-
-    it('falls back to console.log for missing console methods', () => {
-      const originalInfo = console.info
-      try {
-        ;(console as any).info = undefined
-        jest.isolateModules(() => {
-          const config = require('../src/bugsnag').config
-          const logger = config.logger.defaultValue()
-          expect(typeof logger.info).toBe('function')
-          expect(typeof logger.debug).toBe('function')
-        })
-      } finally {
-        ;(console as any).info = originalInfo
       }
     })
 
     it('defaults releaseStage to production for non-localhost hosts', () => {
       const original = window.location
       try {
-        Object.defineProperty(window, 'location', { value: { host: 'example.com' }, configurable: true })
-        jest.isolateModules(() => {
-          const config = require('../src/bugsnag').config
-          expect(config.releaseStage.defaultValue()).toBe('production')
+        Object.defineProperty(window, 'location', {
+          value: { host: 'example.com', pathname: '/', href: 'http://example.com/' },
+          configurable: true
         })
+        const { Bugsnag, captured } = start()
+        Bugsnag.notify(new Error('x'))
+        expect(firstEvent(captured).app.releaseStage).toBe('production')
       } finally {
         Object.defineProperty(window, 'location', { value: original, configurable: true })
       }

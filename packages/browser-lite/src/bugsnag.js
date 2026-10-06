@@ -104,7 +104,7 @@
   }
 
   function throwsMessage (err) {
-    return '[Throws: ' + (err ? err.message : '?') + ']'
+    return '[Throws: ' + err.message + ']'
   }
 
   function find (haystack, needle) {
@@ -333,7 +333,7 @@
     return { unhandledExceptions: true, unhandledRejections: true }
   }
 
-  var schema = {
+  var configSchema = {
     apiKey: {
       defaultValue: function () { return null },
       message: 'is required',
@@ -345,7 +345,7 @@
       validate: function (value) { return value === undefined || stringWithLength(value) }
     },
     appType: {
-      defaultValue: function () { return undefined },
+      defaultValue: function () { return 'browser' },
       message: 'should be a string',
       validate: function (value) { return value === undefined || stringWithLength(value) }
     },
@@ -409,7 +409,10 @@
       }
     },
     releaseStage: {
-      defaultValue: function () { return 'production' },
+      defaultValue: function () {
+        if (/^localhost(:\d+)?$/.test(window.location.host)) return 'development'
+        return 'production'
+      },
       message: 'should be a string',
       validate: function (value) { return typeof value === 'string' && value.length }
     },
@@ -448,7 +451,11 @@
       validate: function (value) { return typeof value === 'object' && value !== null }
     },
     logger: {
-      defaultValue: function () { return undefined },
+      defaultValue: function () {
+        return (typeof console !== 'undefined' && typeof console.debug === 'function')
+          ? getPrefixedConsole()
+          : undefined
+      },
       message: 'should be null or an object with methods { debug, info, warn, error }',
       validate: function (value) {
         return (!value) || (value && reduceArray(['debug', 'info', 'warn', 'error'], function (accum, method) {
@@ -508,26 +515,6 @@
     }
     return logger
   }
-
-  // browser-lite overrides
-  schema.releaseStage = assign({}, schema.releaseStage, {
-    defaultValue: function () {
-      if (/^localhost(:\d+)?$/.test(window.location.host)) return 'development'
-      return 'production'
-    }
-  })
-
-  schema.appType = assign({}, schema.appType, {
-    defaultValue: function () { return 'browser' }
-  })
-
-  schema.logger = assign({}, schema.logger, {
-    defaultValue: function () {
-      return (typeof console !== 'undefined' && typeof console.debug === 'function')
-        ? getPrefixedConsole()
-        : undefined
-    }
-  })
 
   /* -------------------------------------------------------------------------
    * stacktrace parsing
@@ -894,13 +881,7 @@
 
   Event.getStacktrace = function (error, errorFramesToSkip, backtraceFramesToSkip) {
     if (hasStack(error)) return parseStack(error).slice(errorFramesToSkip)
-    try {
-      return filterArray(generateStack(), function (frame) {
-        return (frame.functionName || '').indexOf('StackGenerator$$') === -1
-      }).slice(1 + backtraceFramesToSkip)
-    } catch (e) {
-      return []
-    }
+    return generateStack().slice(1 + backtraceFramesToSkip)
   }
 
   Event.create = function (maybeError, tolerateNonErrors, handledState, component, errorFramesToSkip, logger) {
@@ -1017,6 +998,7 @@
    * ---------------------------------------------------------------------- */
 
   function Client (configuration, schema, internalPlugins, notifier) {
+    if (schema === undefined) schema = configSchema
     if (internalPlugins === undefined) internalPlugins = []
 
     this._notifier = notifier
@@ -1062,7 +1044,7 @@
   }
 
   Client.prototype._configure = function (opts, internalPlugins) {
-    var schema = reduceArray(internalPlugins || [], function (s, plugin) {
+    var schema = reduceArray(internalPlugins, function (s, plugin) {
       if (plugin && plugin.configSchema) return assign({}, s, plugin.configSchema)
       return s
     }, this._schema)
@@ -1298,9 +1280,7 @@
     }
 
     var callbacks = [].concat(this._cbs.e).concat(onError)
-    runCallbacks(callbacks, event, onCallbackError, function (err, shouldSend) {
-      if (err) onCallbackError(err)
-
+    runCallbacks(callbacks, event, onCallbackError, function (callbackErr, shouldSend) {
       if (!shouldSend) {
         self._logger.debug('Event not sent due to onError callback')
         return postReportCallback(null, event)
@@ -1597,49 +1577,53 @@
     return plugin
   }
 
-  var consoleBreadcrumbsPlugin = {
-    load: function (client) {
-      var isDev = /^(local-)?dev(elopment)?$/.test(client._config.releaseStage)
+  function consoleBreadcrumbsPlugin () {
+    var plugin = {
+      load: function (client) {
+        var isDev = /^(local-)?dev(elopment)?$/.test(client._config.releaseStage)
 
-      if (isDev || !client._isBreadcrumbTypeEnabled('log')) return
+        if (isDev || !client._isBreadcrumbTypeEnabled('log')) return
 
-      var methods = filterArray(['log', 'debug', 'info', 'warn', 'error'], function (method) {
-        return typeof console !== 'undefined' && typeof console[method] === 'function'
-      })
+        var methods = filterArray(['log', 'debug', 'info', 'warn', 'error'], function (method) {
+          return typeof console !== 'undefined' && typeof console[method] === 'function'
+        })
 
-      for (var i = 0; i < methods.length; i++) {
-        (function (method) {
-          var original = console[method]
-          console[method] = function () {
-            var args = arguments
-            var metadata = { severity: method.indexOf('group') === 0 ? 'log' : method }
-            for (var j = 0; j < args.length; j++) {
-              var arg = args[j]
-              var stringified = '[Unknown value]'
-              try { stringified = String(arg) } catch (e) {}
-              if (stringified === '[object Object]') {
-                try { stringified = JSON.stringify(arg) } catch (e) {}
+        for (var i = 0; i < methods.length; i++) {
+          (function (method) {
+            var original = console[method]
+            console[method] = function () {
+              var args = arguments
+              var metadata = { severity: method }
+              for (var j = 0; j < args.length; j++) {
+                var arg = args[j]
+                var stringified = '[Unknown value]'
+                try { stringified = String(arg) } catch (e) {}
+                if (stringified === '[object Object]') {
+                  try { stringified = JSON.stringify(arg) } catch (e) {}
+                }
+                metadata['[' + j + ']'] = stringified
               }
-              metadata['[' + j + ']'] = stringified
+              client.leaveBreadcrumb('Console output', metadata, 'log')
+              original.apply(console, args)
             }
-            client.leaveBreadcrumb('Console output', metadata, 'log')
-            original.apply(console, args)
-          }
-          console[method]._restore = function () { console[method] = original }
-        })(methods[i])
-      }
-    }
-  }
-
-  if (process.env.NODE_ENV !== 'production') {
-    consoleBreadcrumbsPlugin.destroy = function () {
-      var methods = ['log', 'debug', 'info', 'warn', 'error']
-      for (var i = 0; i < methods.length; i++) {
-        if (console[methods[i]] && typeof console[methods[i]]._restore === 'function') {
-          console[methods[i]]._restore()
+            console[method]._restore = function () { console[method] = original }
+          })(methods[i])
         }
       }
     }
+
+    if (process.env.NODE_ENV !== 'production') {
+      plugin.destroy = function () {
+        var methods = ['log', 'debug', 'info', 'warn', 'error']
+        for (var i = 0; i < methods.length; i++) {
+          if (console[methods[i]] && typeof console[methods[i]]._restore === 'function') {
+            console[methods[i]]._restore()
+          }
+        }
+      }
+    }
+
+    return plugin
   }
 
   /* -------------------------------------------------------------------------
@@ -1737,10 +1721,7 @@
           client._logger.error(e)
         }
       },
-      sendSession: function (session, cb) {
-        if (cb === undefined) cb = function () {}
-        cb(new Error('Session not sent due to incomplete endpoint configuration'))
-      }
+      sendSession: noop
     }
   }
 
@@ -1764,10 +1745,10 @@
         stripQueryStringPlugin,
         windowOnerrorPlugin(),
         unhandledRejectionPlugin(),
-        consoleBreadcrumbsPlugin
+        consoleBreadcrumbsPlugin()
       ]
 
-      var bugsnag = new Client(opts, schema, internalPlugins, { name: name, version: version, url: url })
+      var bugsnag = new Client(opts, configSchema, internalPlugins, { name: name, version: version, url: url })
 
       bugsnag._setDelivery(xmlHttpRequestDelivery)
 
@@ -1806,7 +1787,4 @@
 
   module.exports = Bugsnag
   module.exports.default = Bugsnag
-  module.exports._device = devicePlugin
-  module.exports._strip = stripQueryString
-  module.exports.config = schema
 })()
