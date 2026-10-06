@@ -8,7 +8,7 @@ interface BrowserConfig extends Config {
   sendPayloadChecksums?: boolean
 }
 
-export interface BrowserBugsnagStatic extends BugsnagStatic {
+export interface BrowserBugsnagStatic extends Omit<BugsnagStatic, 'startSession' | 'pauseSession' | 'resumeSession'> {
   start(apiKeyOrOpts: string | BrowserConfig): Client
   createClient(apiKeyOrOpts: string | BrowserConfig): Client
 }

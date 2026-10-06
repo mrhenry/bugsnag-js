@@ -1,4 +1,4 @@
-import BugsnagBrowserStatic, { Breadcrumb, BrowserConfig, Session } from '../src/notifier'
+import BugsnagBrowserStatic, { Breadcrumb, BrowserConfig } from '../src/notifier'
 
 const DONE = window.XMLHttpRequest.DONE
 
@@ -12,7 +12,8 @@ interface MockXHR {
 
 type SendCallback = (xhr: MockXHR) => void
 
-function mockFetch (onSessionSend?: SendCallback, onNotifySend?: SendCallback) {
+// browser-lite does not support sessions, so only notify requests are expected
+function mockFetch (onNotifySend?: SendCallback) {
   const makeMockXHR = (onSend?: SendCallback) => {
     const xhr = {
       open: jest.fn(),
@@ -28,24 +29,19 @@ function mockFetch (onSessionSend?: SendCallback, onNotifySend?: SendCallback) {
     return xhr
   }
 
-  const session = makeMockXHR(onSessionSend)
   const notify = makeMockXHR(onNotifySend)
 
   // @ts-ignore
   window.XMLHttpRequest = jest.fn()
-    .mockImplementationOnce(() => session)
     .mockImplementationOnce(() => notify)
     .mockImplementation(() => makeMockXHR(() => {}))
   // @ts-ignore
   window.XMLHttpRequest.DONE = DONE
 
-  return { session, notify }
+  return { notify }
 }
 
 describe('browser notifier', () => {
-  const onNotifySend = jest.fn()
-  const onSessionSend = jest.fn()
-
   beforeAll(() => {
     jest.spyOn(console, 'debug').mockImplementation(() => {})
     jest.spyOn(console, 'warn').mockImplementation(() => {})
@@ -72,15 +68,17 @@ describe('browser notifier', () => {
     expect(Bugsnag.getPlugin('foobar')).toBe(10)
   })
 
-  it('notifies handled errors', (done) => {
-    const onSessionSend = (session: MockXHR) => {
-      expect(session.open).toHaveBeenCalledWith('POST', 'https://sessions.bugsnag.com')
-      expect(session.setRequestHeader).toHaveBeenCalledWith('Content-Type', 'application/json')
-      expect(session.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Api-Key', '030bab153e7c2349be364d23b5ae93b5')
-      expect(session.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Payload-Version', '1')
-      expect(session.send).toHaveBeenCalledWith(expect.any(String))
-    }
+  it('does not expose the session API', () => {
+    const Bugsnag = getBugsnag()
+    // @ts-expect-error
+    expect(Bugsnag.startSession).toBeUndefined()
+    // @ts-expect-error
+    expect(Bugsnag.pauseSession).toBeUndefined()
+    // @ts-expect-error
+    expect(Bugsnag.resumeSession).toBeUndefined()
+  })
 
+  it('notifies handled errors', (done) => {
     const onNotifySend = (notify: MockXHR) => {
       expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.bugsnag.com')
       expect(notify.setRequestHeader).toHaveBeenCalledWith('Content-Type', 'application/json')
@@ -90,7 +88,7 @@ describe('browser notifier', () => {
       done()
     }
 
-    mockFetch(onSessionSend, onNotifySend)
+    mockFetch(onNotifySend)
 
     const Bugsnag = getBugsnag()
     Bugsnag.start(API_KEY)
@@ -107,7 +105,7 @@ describe('browser notifier', () => {
   })
 
   it('does not send an event with invalid configuration', () => {
-    mockFetch(onSessionSend, onNotifySend)
+    const { notify } = mockFetch()
 
     const Bugsnag = getBugsnag()
     // @ts-expect-error
@@ -115,28 +113,12 @@ describe('browser notifier', () => {
     Bugsnag.notify(new Error('123'), undefined, (err, event) => {
       expect(err).toStrictEqual(new Error('Event not sent due to incomplete endpoint configuration'))
     })
-  })
 
-  it('does not send a session with invalid configuration', (done) => {
-    const { session } = mockFetch()
-    const Bugsnag = getBugsnag()
-    // @ts-expect-error
-    Bugsnag.start({ apiKey: API_KEY, endpoints: { notify: 'https://notify.bugsnag.com' } })
-    Bugsnag.startSession()
-
-    session.onreadystatechange()
-
-    process.nextTick(() => {
-      expect(session.open).not.toHaveBeenCalled()
-      expect(session.setRequestHeader).not.toHaveBeenCalled()
-      expect(session.send).not.toHaveBeenCalled()
-
-      done()
-    })
+    expect(notify.open).not.toHaveBeenCalled()
   })
 
   it('does not send if false is returned in onError', (done) => {
-    const { session, notify } = mockFetch()
+    const { notify } = mockFetch()
     const Bugsnag = getBugsnag()
     Bugsnag.start(API_KEY)
     Bugsnag.notify(new Error('123'), (event) => {
@@ -148,8 +130,6 @@ describe('browser notifier', () => {
       expect(notify.open).not.toHaveBeenCalled()
       done()
     })
-
-    session.onreadystatechange()
   })
 
   it('accepts all config options', (done) => {
@@ -170,7 +150,7 @@ describe('browser notifier', () => {
       onBreadcrumb: (b: Breadcrumb) => {
         return false
       },
-      onSession: (s: Session) => {
+      onSession: () => {
         return true
       },
       endpoints: { notify: 'https://notify.bugsnag.com', sessions: 'https://sessions.bugsnag.com' },
@@ -231,47 +211,6 @@ describe('browser notifier', () => {
     })
   })
 
-  describe('navigation breadcrumbs', () => {
-    it('resets events on pushState', () => {
-      const Bugsnag = getBugsnag()
-      const client = Bugsnag.createClient('API_KEY')
-      const resetEventCount = jest.spyOn(client, 'resetEventCount')
-
-      window.history.pushState('', '', 'new-url')
-      expect(resetEventCount).toHaveBeenCalled()
-
-      resetEventCount.mockReset()
-      resetEventCount.mockRestore()
-    })
-
-    it('does not reset events on replaceState', () => {
-      const Bugsnag = getBugsnag()
-      const client = Bugsnag.createClient('API_KEY')
-      const resetEventCount = jest.spyOn(client, 'resetEventCount')
-
-      window.history.replaceState('', '', 'new-url')
-      expect(resetEventCount).not.toHaveBeenCalled()
-
-      resetEventCount.mockReset()
-      resetEventCount.mockRestore()
-    })
-
-    it('does not start unnecessary sessions', () => {
-      const Bugsnag = getBugsnag()
-      const client = Bugsnag.createClient('API_KEY')
-      const startSession = jest.spyOn(client, 'startSession')
-
-      window.history.replaceState('', '', 'new-url')
-      expect(startSession).not.toHaveBeenCalled()
-
-      window.history.pushState('', '', 'new-url')
-      expect(startSession).not.toHaveBeenCalled()
-
-      startSession.mockReset()
-      startSession.mockRestore()
-    })
-  })
-
   describe('payload checksum behavior (Bugsnag-Integrity header)', () => {
     beforeEach(() => {
       // @ts-ignore
@@ -284,12 +223,6 @@ describe('browser notifier', () => {
     })
 
     it('includes the integrity header by default', (done) => {
-      const onSessionSend = (session: MockXHR) => {
-        expect(session.open).toHaveBeenCalledWith('POST', 'https://sessions.bugsnag.com')
-        expect(session.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(session.send).toHaveBeenCalledWith(expect.any(String))
-      }
-
       const onNotifySend = (notify: MockXHR) => {
         expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.bugsnag.com')
         expect(notify.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
@@ -297,7 +230,7 @@ describe('browser notifier', () => {
         done()
       }
 
-      mockFetch(onSessionSend, onNotifySend)
+      mockFetch(onNotifySend)
 
       const Bugsnag = getBugsnag()
       Bugsnag.start(API_KEY)
@@ -310,12 +243,6 @@ describe('browser notifier', () => {
     })
 
     it('does not include the integrity header if endpoint configuration is supplied', (done) => {
-      const onSessionSend = (session: MockXHR) => {
-        expect(session.open).toHaveBeenCalledWith('POST', 'https://sessions.custom.com')
-        expect(session.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(session.send).toHaveBeenCalledWith(expect.any(String))
-      }
-
       const onNotifySend = (notify: MockXHR) => {
         expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.custom.com')
         expect(notify.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
@@ -323,7 +250,7 @@ describe('browser notifier', () => {
         done()
       }
 
-      mockFetch(onSessionSend, onNotifySend)
+      mockFetch(onNotifySend)
 
       const Bugsnag = getBugsnag()
       Bugsnag.start({ apiKey: API_KEY, endpoints: { notify: 'https://notify.custom.com', sessions: 'https://sessions.custom.com' } })
@@ -335,12 +262,6 @@ describe('browser notifier', () => {
     })
 
     it('can be enabled for a custom endpoint configuration by using sendPayloadChecksums', (done) => {
-      const onSessionSend = (session: MockXHR) => {
-        expect(session.open).toHaveBeenCalledWith('POST', 'https://sessions.custom.com')
-        expect(session.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(session.send).toHaveBeenCalledWith(expect.any(String))
-      }
-
       const onNotifySend = (notify: MockXHR) => {
         expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.custom.com')
         expect(notify.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
@@ -348,7 +269,7 @@ describe('browser notifier', () => {
         done()
       }
 
-      mockFetch(onSessionSend, onNotifySend)
+      mockFetch(onNotifySend)
 
       const Bugsnag = getBugsnag()
       Bugsnag.start({

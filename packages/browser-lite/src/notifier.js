@@ -23,6 +23,10 @@ const pluginStripQueryString = require('@bugsnag/plugin-strip-query-string')
 // delivery mechanisms
 const dXMLHttpRequest = require('@bugsnag/delivery-xml-http-request')
 
+// sessions are not supported by browser-lite, so these Client methods are not
+// exposed on the static API (calling them is a clear TypeError)
+const UNSUPPORTED_METHODS = ['startSession', 'pauseSession', 'resumeSession']
+
 const Bugsnag = {
   _client: null,
   createClient: (opts) => {
@@ -67,6 +71,7 @@ const Bugsnag = {
 
 map(['resetEventCount'].concat(keys(Client.prototype)), (m) => {
   if (/^_/.test(m)) return
+  if (UNSUPPORTED_METHODS.indexOf(m) !== -1) return
   Bugsnag[m] = function () {
     if (!Bugsnag._client) return console.log(`Bugsnag.${m}() was called before Bugsnag.start()`)
     Bugsnag._client._depth += 1
