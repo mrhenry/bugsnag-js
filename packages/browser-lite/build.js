@@ -9,8 +9,8 @@
  *
  * The source is an ES module with named exports, so there is no bundling,
  * wrapping or transpilation step and no runtime/helper bloat is introduced.
- * The minifier is told to mangle top-level identifiers (the internals) while
- * preserving the exported names.
+ * The minifier is told to mangle top-level identifiers and private (`_`)
+ * properties while preserving the exported names.
  */
 
 const { readFileSync, writeFileSync } = require('fs')
@@ -32,8 +32,8 @@ if (!min) {
   execFileSync(uglify, [
     '--compress', 'passes=3',
     '--mangle', 'toplevel',
+    '--mangle-props', 'regex=/^_/',
     '--ie8',
-    '--source-map', 'filename=bugsnag.js,url=bugsnag.min.js.map,includeSources',
     '--output', out
   ], { input: source, stdio: ['pipe', 'inherit', 'inherit'] })
 }

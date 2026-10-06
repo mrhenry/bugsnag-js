@@ -240,7 +240,7 @@ function stringifyConfigValue (v) {
 
 function getLogger () {
   var logger = {}
-  var methods = ['debug', 'info', 'warn', 'error']
+    var methods = ['debug', 'warn', 'error']
   for (var i = 0; i < methods.length; i++) {
     var m = methods[i]
     logger[m] = (function (m) {
@@ -260,7 +260,7 @@ function Client (configuration, notifier) {
   this._delivery = { sendEvent: noop }
   this._logger = getLogger()
   this._metadata = {}
-  this._cbs = { e: [] }
+  this._cbs = []
   this.Client = Client
   this.Event = Event
   this._config = this._configure(configuration)
@@ -284,7 +284,7 @@ Client.prototype._configure = function (opts) {
   if (!config.apiKey) throw new Error('No Bugsnag API Key set')
   if (!/^[0-9a-f]{32}$/i.test(config.apiKey)) errors.push('  - apiKey should be a string of 32 hexadecimal characters')
 
-  if (config.onError) this._cbs.e = [].concat(config.onError)
+  if (config.onError) this._cbs = [].concat(config.onError)
   if (errors.length) this._logger.warn(new Error('Invalid configuration\n' + errors.join('\n\n')))
 
   return config
@@ -295,7 +295,7 @@ Client.prototype.addMetadata = function (section, keyOrObj, maybeVal) {
 }
 
 Client.prototype.addOnError = function (fn, front) {
-  this._cbs.e[front ? 'unshift' : 'push'](fn)
+  this._cbs[front ? 'unshift' : 'push'](fn)
 }
 
 Client.prototype.notify = function (maybeError) {
@@ -316,7 +316,7 @@ Client.prototype._notify = function (event) {
 
   var originalSeverity = event.severity
 
-  if (!runCallbacks(this._cbs.e, event, this._logger)) {
+  if (!runCallbacks(this._cbs, event, this._logger)) {
     this._logger.debug('Event not sent due to onError callback')
     return
   }

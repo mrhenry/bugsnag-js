@@ -54,9 +54,11 @@ packages/browser-lite/
 - `types`: `types/bugsnag.d.ts`
 - Build (`build.js`): the source is already a self-contained ES module, so the
   build only substitutes `__VERSION__` with the package version and then
-  minifies with uglify (`--compress passes=3 --mangle toplevel --ie8`). No
-  bundling, wrapping or transpilation happens and no runtime/helper bloat is
-  introduced.
+  minifies with uglify
+  (`--compress passes=3 --mangle toplevel --mangle-props regex=/^_/ --ie8`).
+  No bundling, wrapping or transpilation happens and no runtime/helper bloat is
+  introduced. Private (`_`-prefixed) properties are mangled; exported names are
+  preserved.
 - `bin/size` reports the **gzipped** size of `dist/bugsnag.min.js`.
 - There is no UMD/AMD wrapper and nothing is attached to `window`.
 
