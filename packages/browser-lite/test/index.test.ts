@@ -1,4 +1,4 @@
-import BugsnagBrowserStatic, { Breadcrumb, BrowserConfig } from '../src/notifier'
+import BugsnagBrowserStatic, { Breadcrumb, BrowserConfig } from '../src/bugsnag'
 
 const DONE = window.XMLHttpRequest.DONE
 
@@ -52,7 +52,7 @@ describe('browser notifier', () => {
   })
 
   function getBugsnag (): typeof BugsnagBrowserStatic {
-    const Bugsnag = require('../src/notifier') as typeof BugsnagBrowserStatic
+    const Bugsnag = require('../src/bugsnag') as typeof BugsnagBrowserStatic
     return Bugsnag
   }
 

@@ -1,4 +1,4 @@
-const pluginDevice = require('../src/device')
+const pluginDevice = require('../src/bugsnag')._device
 
 function fakeClient () {
   const cbs: any[] = []

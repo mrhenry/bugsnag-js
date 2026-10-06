@@ -1,4 +1,4 @@
-import type BugsnagBrowserStatic from '../src/notifier'
+import type BugsnagBrowserStatic from '../src/bugsnag'
 
 const DONE = window.XMLHttpRequest.DONE
 const API_KEY = '030bab153e7c2349be364d23b5ae93b5'
@@ -45,7 +45,7 @@ function mockDelivery (): Captured[] {
 }
 
 function getBugsnag (): typeof BugsnagBrowserStatic {
-  return require('../src/notifier') as typeof BugsnagBrowserStatic
+  return require('../src/bugsnag') as typeof BugsnagBrowserStatic
 }
 
 function start (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, captured: Captured[] } {
@@ -367,7 +367,7 @@ describe('browser-lite behaviour', () => {
     })
 
     it('strips query strings and fragments from stack frame file paths', () => {
-      const { _strip } = require('@bugsnag/plugin-strip-query-string')
+      const { _strip } = require('../src/bugsnag')
       expect(_strip('http://example.com/app.js?v=1#hash')).toBe('http://example.com/app.js')
     })
   })
@@ -525,7 +525,7 @@ describe('browser-lite behaviour', () => {
       try {
         ;(console as any).debug = undefined
         jest.isolateModules(() => {
-          const config = require('../src/config')
+          const config = require('../src/bugsnag').config
           expect(config.logger.defaultValue()).toBeUndefined()
         })
       } finally {
@@ -538,7 +538,7 @@ describe('browser-lite behaviour', () => {
       try {
         ;(console as any).info = undefined
         jest.isolateModules(() => {
-          const config = require('../src/config')
+          const config = require('../src/bugsnag').config
           const logger = config.logger.defaultValue()
           expect(typeof logger.info).toBe('function')
           expect(typeof logger.debug).toBe('function')
@@ -553,7 +553,7 @@ describe('browser-lite behaviour', () => {
       try {
         Object.defineProperty(window, 'location', { value: { host: 'example.com' }, configurable: true })
         jest.isolateModules(() => {
-          const config = require('../src/config')
+          const config = require('../src/bugsnag').config
           expect(config.releaseStage.defaultValue()).toBe('production')
         })
       } finally {
