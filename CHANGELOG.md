@@ -1,6 +1,37 @@
 # Changelog
 
+## [9.0.0] - 2026-09-22
+
+### Summary
+Major release **v9.0.0** includes React Native New Architecture compatibility updates (including Android 15 and iOS build optimization), Electron delivery resilience enhancements, critical Linux compilation fixes for GLIBC ≥ 2.28, and essential SCA/dependency upgrades.
+
+### Fixed
+- (plugin-electron-client-state-persistence) Fix Linux build failure by removing unused POSIX `once_flag` and `call_once` definitions from vendored `tinycthread`, resolving conflicts with glibc ≥ 2.28 during `node-gyp rebuild` [#2769](https://github.com/bugsnag/bugsnag-js/pull/2769)
+- (delivery-electron, plugin-electron-deliver-minidumps) Prevent tight retry loops on unreachable endpoints during minidump delivery queue processing [#2822](https://github.com/bugsnag/bugsnag-js/pull/2822)
+- (react-native) Fix React Navigation crash on New Architecture (React Native 0.84+) by ensuring `super.onCreate(null)` executes in `MainActivity` [#2820](https://github.com/bugsnag/bugsnag-js/pull/2820)
+
+### Added
+- (react-native) Support dynamic Boost 1.76.0 podspec downloading with pre-signed Google Cloud Storage URLs for React Native ≤ 0.72 [#2820](https://github.com/bugsnag/bugsnag-js/pull/2820)
+
+## [8.10.0] - 2026-07-10
+
+### Fixed
+
+- (delivery-node) Replace deprecated `url.parse()` with `URL` constructor [#2730](https://github.com/bugsnag/bugsnag-js/pull/2730)
+- (plugin-hono) Fix issue where error handler middleware did not `await next()` [#2735](https://github.com/bugsnag/bugsnag-js/pull/2735)
+- (react-native) Fix issue related to uploading source map [#2773](https://github.com/bugsnag/bugsnag-js/pull/2773)
+
+### Added
+- (react-native-navigation) Add support for react-native-navigation v8 [#2741](https://github.com/bugsnag/bugsnag-js/pull/2741)
+- Requires React Native 0.78+ (New Architecture only)
+- Peer dependency range updated: react-native-navigation 2.0.0 - 8.x
+
+
 ## [8.9.0] - 2026-04-08
+
+### Fixed
+
+- (plugin-inline-script-content) Fix strict mode compatibility by replacing `arguments` usage with rest parameters [#2711](https://github.com/bugsnag/bugsnag-js/pull/2711)
 
 ### Added 
 
