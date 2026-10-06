@@ -1,4 +1,4 @@
-import { API_KEY, createClient, firstEvent, getBugsnag, mockDelivery, start } from './helpers'
+import { API_KEY, createClient, firstEvent, getBugsnag, start } from './helpers'
 
 const realConsole = {
   log: console.log,
@@ -69,16 +69,8 @@ describe('delivery public API', () => {
       expect(firstEvent(captured).metaData.auth).toStrictEqual({ password: '[REDACTED]', user: 'bob' })
     })
 
-    it('uses the secondary endpoint for API keys starting with 00000', () => {
-      const captured = mockDelivery()
-      const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: '00000abc000000000000000000000000', sendPayloadChecksums: false })
-      Bugsnag.notify(new Error('x'))
-      expect(captured[0].url).toBe('https://notify.bugsnag.smartbear.com')
-    })
-
     it('reports an error when endpoint configuration is incomplete', () => {
-      const { Bugsnag } = start({ endpoints: { notify: 'https://notify.custom.com' } })
+      const { Bugsnag } = start({ endpoints: {} })
       Bugsnag.notify(new Error('x'), undefined, (err: any) => {
         expect(err).toStrictEqual(new Error('Event not sent due to incomplete endpoint configuration'))
       })
@@ -112,45 +104,11 @@ describe('delivery public API', () => {
       Bugsnag.notify(new Error('2'))
       Bugsnag.notify(new Error('3'))
       expect(captured).toHaveLength(2)
-      expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('maxEvents per session limit'))
+      expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('maxEvents limit'))
 
       Bugsnag.resetEventCount()
       Bugsnag.notify(new Error('4'))
       expect(captured).toHaveLength(3)
-    })
-  })
-
-  describe('payload checksums', () => {
-    beforeEach(() => {
-      // @ts-ignore
-      window.isSecureContext = true
-    })
-
-    it('includes the integrity header by default', async () => {
-      const { Bugsnag, captured } = start({ sendPayloadChecksums: true })
-      await new Promise<void>(resolve => Bugsnag.notify(new Error('x'), undefined, () => resolve()))
-      expect(captured[0].headers['Bugsnag-Integrity']).toMatch(/^sha1 /)
-    })
-
-    it('does not include the integrity header when disabled', () => {
-      const { Bugsnag, captured } = start({ sendPayloadChecksums: false })
-      Bugsnag.notify(new Error('x'))
-      expect(captured[0].headers['Bugsnag-Integrity']).toBeUndefined()
-    })
-
-    it('sends without an integrity header when the digest fails', async () => {
-      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
-      const digest = jest.spyOn(window.crypto.subtle, 'digest').mockRejectedValue(new Error('nope'))
-      try {
-        const { Bugsnag, captured } = start({ sendPayloadChecksums: true })
-        Bugsnag.notify(new Error('x'))
-        await new Promise(resolve => setTimeout(resolve, 10))
-        expect(captured).toHaveLength(1)
-        expect(captured[0].headers['Bugsnag-Integrity']).toBeUndefined()
-        expect(error).toHaveBeenCalled()
-      } finally {
-        digest.mockRestore()
-      }
     })
   })
 
@@ -159,7 +117,7 @@ describe('delivery public API', () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => {})
       const captured = mockStatus(500)
       const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false })
+      Bugsnag.start({ apiKey: API_KEY })
       let result: any
       Bugsnag.notify(new Error('x'), undefined, (err: any) => { result = err })
       expect(result.message).toContain('Request failed with status 500')
@@ -171,7 +129,7 @@ describe('delivery public API', () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => {})
       mockStatus(0)
       const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false })
+      Bugsnag.start({ apiKey: API_KEY })
       let result: any
       Bugsnag.notify(new Error('x'), undefined, (err: any) => { result = err })
       expect(result).toBeInstanceOf(Error)
@@ -183,7 +141,7 @@ describe('delivery public API', () => {
       jest.spyOn(console, 'error').mockImplementation(() => {})
       mockStatus(500)
       const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false })
+      Bugsnag.start({ apiKey: API_KEY })
       Bugsnag.notify(new Error('x'.repeat(1.2e6)))
       expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('Event oversized'))
     })
@@ -195,7 +153,7 @@ describe('delivery public API', () => {
       // @ts-ignore
       window.XMLHttpRequest.DONE = 4
       const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false })
+      Bugsnag.start({ apiKey: API_KEY })
       expect(() => Bugsnag.notify(new Error('x'))).not.toThrow()
       expect(error).toHaveBeenCalled()
     })

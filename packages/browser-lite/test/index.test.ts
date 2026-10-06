@@ -1,4 +1,4 @@
-import BugsnagBrowserStatic, { Breadcrumb, BrowserConfig } from '../src/bugsnag'
+import BugsnagBrowserStatic, { BrowserConfig } from '../src/bugsnag'
 
 const DONE = window.XMLHttpRequest.DONE
 
@@ -56,18 +56,6 @@ describe('browser notifier', () => {
     return Bugsnag
   }
 
-  it('accepts plugins', () => {
-    const Bugsnag = getBugsnag()
-    Bugsnag.start({
-      apiKey: API_KEY,
-      plugins: [{
-        name: 'foobar',
-        load: client => 10
-      }]
-    })
-    expect(Bugsnag.getPlugin('foobar')).toBe(10)
-  })
-
   it('does not expose the session API', () => {
     const Bugsnag = getBugsnag()
     // @ts-expect-error
@@ -96,10 +84,6 @@ describe('browser notifier', () => {
       if (err) {
         done(err)
       }
-      expect(event.breadcrumbs[0]).toStrictEqual(expect.objectContaining({
-        type: 'state',
-        message: 'Bugsnag loaded'
-      }))
       expect(event.originalError.message).toBe('123')
     })
   })
@@ -109,7 +93,7 @@ describe('browser notifier', () => {
 
     const Bugsnag = getBugsnag()
     // @ts-expect-error
-    Bugsnag.start({ apiKey: API_KEY, endpoints: { notify: 'https://notify.bugsnag.com' } })
+    Bugsnag.start({ apiKey: API_KEY, endpoints: {} })
     Bugsnag.notify(new Error('123'), undefined, (err, event) => {
       expect(err).toStrictEqual(new Error('Event not sent due to incomplete endpoint configuration'))
     })
@@ -147,30 +131,17 @@ describe('browser notifier', () => {
       onError: [
         event => true
       ],
-      onBreadcrumb: (b: Breadcrumb) => {
-        return false
-      },
-      onSession: () => {
-        return true
-      },
-      endpoints: { notify: 'https://notify.bugsnag.com', sessions: 'https://sessions.bugsnag.com' },
-      autoTrackSessions: true,
+      endpoints: { notify: 'https://notify.bugsnag.com' },
       enabledReleaseStages: ['zzz'],
       releaseStage: 'production',
-      maxBreadcrumbs: 20,
-      enabledBreadcrumbTypes: ['manual', 'log', 'request'],
       context: 'contextual',
-      featureFlags: [],
-      plugins: [],
-      user: null,
       metadata: {
         debug: { foo: 'bar' }
       },
       logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
       redactedKeys: ['foo', /bar/],
       maxEvents: 10,
-      reportUnhandledPromiseRejectionsAsHandled: true,
-      sendPayloadChecksums: true
+      reportUnhandledPromiseRejectionsAsHandled: true
     }
 
     Bugsnag.start(completeConfig)
@@ -180,7 +151,6 @@ describe('browser notifier', () => {
       if (err) {
         done(err)
       }
-      expect(event.breadcrumbs.length).toBe(0)
       expect(event.originalError.message).toBe('123')
       expect(event.getMetadata('debug')).toEqual({ foo: 'bar' })
       done()
@@ -192,93 +162,5 @@ describe('browser notifier', () => {
     expect(Bugsnag.isStarted()).toBe(false)
     Bugsnag.start(API_KEY)
     expect(Bugsnag.isStarted()).toBe(true)
-  })
-
-  it('enables accessing feature flags from events passed to onError callback', (done) => {
-    const Bugsnag = getBugsnag()
-    Bugsnag.start(API_KEY)
-    Bugsnag.addFeatureFlag('feature 1', '1.0')
-    Bugsnag.notify(new Error('test error'), (event) => {
-      event.addFeatureFlag('feature 2', '2.0')
-      expect(event.getFeatureFlags()).toStrictEqual([
-        { featureFlag: 'feature 1', variant: '1.0' },
-        { featureFlag: 'feature 2', variant: '2.0' }
-      ])
-      done()
-    })
-  })
-
-  describe('payload checksum behavior (Bugsnag-Integrity header)', () => {
-    beforeEach(() => {
-      // @ts-ignore
-      window.isSecureContext = true
-    })
-
-    afterEach(() => {
-      // @ts-ignore
-      window.isSecureContext = false
-    })
-
-    it('includes the integrity header by default', (done) => {
-      const onNotifySend = (notify: MockXHR) => {
-        expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.bugsnag.com')
-        expect(notify.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(notify.send).toHaveBeenCalledWith(expect.any(String))
-        done()
-      }
-
-      mockFetch(onNotifySend)
-
-      const Bugsnag = getBugsnag()
-      Bugsnag.start(API_KEY)
-
-      Bugsnag.notify(new Error('123'), undefined, (err, event) => {
-        if (err) {
-          done(err)
-        }
-      })
-    })
-
-    it('does not include the integrity header if endpoint configuration is supplied', (done) => {
-      const onNotifySend = (notify: MockXHR) => {
-        expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.custom.com')
-        expect(notify.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(notify.send).toHaveBeenCalledWith(expect.any(String))
-        done()
-      }
-
-      mockFetch(onNotifySend)
-
-      const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY, endpoints: { notify: 'https://notify.custom.com', sessions: 'https://sessions.custom.com' } })
-      Bugsnag.notify(new Error('123'), undefined, (err, event) => {
-        if (err) {
-          done(err)
-        }
-      })
-    })
-
-    it('can be enabled for a custom endpoint configuration by using sendPayloadChecksums', (done) => {
-      const onNotifySend = (notify: MockXHR) => {
-        expect(notify.open).toHaveBeenCalledWith('POST', 'https://notify.custom.com')
-        expect(notify.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
-        expect(notify.send).toHaveBeenCalledWith(expect.any(String))
-        done()
-      }
-
-      mockFetch(onNotifySend)
-
-      const Bugsnag = getBugsnag()
-      Bugsnag.start({
-        apiKey: API_KEY,
-        endpoints: { notify: 'https://notify.custom.com', sessions: 'https://sessions.custom.com' },
-        sendPayloadChecksums: true
-      })
-      Bugsnag.notify(new Error('123'), undefined, (err, event) => {
-        if (err) {
-          done(err)
-        }
-      })
-    })
   })
 })

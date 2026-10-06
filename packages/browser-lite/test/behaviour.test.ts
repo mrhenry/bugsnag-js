@@ -10,8 +10,8 @@ interface Captured {
   body: any
 }
 
-// console is mutated by the console-breadcrumbs plugin on every start(), so keep
-// the real methods around and restore them after each test
+// console is mutated by tests, so keep the real methods around and restore them
+// after each test
 const realConsole = {
   log: console.log,
   debug: console.debug,
@@ -51,7 +51,7 @@ function getBugsnag (): typeof BugsnagBrowserStatic {
 function start (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()
-  Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false, ...opts })
+  Bugsnag.start({ apiKey: API_KEY, ...opts })
   return { Bugsnag, captured }
 }
 
@@ -60,7 +60,7 @@ function start (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, capture
 function createClient (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, client: any, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()
-  const client = Bugsnag.createClient({ apiKey: API_KEY, sendPayloadChecksums: false, ...opts })
+  const client = Bugsnag.createClient({ apiKey: API_KEY, ...opts })
   return { Bugsnag, client, captured }
 }
 
@@ -259,13 +259,6 @@ describe('browser-lite behaviour', () => {
       expect(event.severity).toBe('info')
       expect(event.severityReason).toStrictEqual({ type: 'userCallbackSetSeverity' })
     })
-
-    it('does not invoke onSession callbacks (sessions unsupported)', () => {
-      const onSession = jest.fn()
-      const { Bugsnag } = start({ onSession })
-      Bugsnag.notify(new Error('x'))
-      expect(onSession).not.toHaveBeenCalled()
-    })
   })
 
   describe('metadata', () => {
@@ -274,66 +267,6 @@ describe('browser-lite behaviour', () => {
       client.addMetadata('checkout', { cartId: 'c-1' })
       client.notify(new Error('x'))
       expect(firstEvent(captured).metaData.checkout).toStrictEqual({ cartId: 'c-1' })
-    })
-  })
-
-  describe('breadcrumbs', () => {
-    it('starts with a "Bugsnag loaded" state breadcrumb', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).breadcrumbs[0]).toStrictEqual(expect.objectContaining({
-        type: 'state',
-        name: 'Bugsnag loaded'
-      }))
-    })
-
-    it('adds manual breadcrumbs with a timestamp', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.leaveBreadcrumb('clicked thing', { id: 7 }, 'manual')
-      Bugsnag.notify(new Error('x'))
-      const crumb = firstEvent(captured).breadcrumbs[1]
-      expect(crumb).toStrictEqual(expect.objectContaining({
-        type: 'manual',
-        name: 'clicked thing',
-        metaData: { id: 7 }
-      }))
-      expect(typeof crumb.timestamp).toBe('string')
-    })
-
-    it('caps breadcrumbs at maxBreadcrumbs', () => {
-      const { Bugsnag, captured } = start({ maxBreadcrumbs: 2 })
-      Bugsnag.leaveBreadcrumb('a')
-      Bugsnag.leaveBreadcrumb('b')
-      Bugsnag.leaveBreadcrumb('c')
-      Bugsnag.notify(new Error('x'))
-      const names = firstEvent(captured).breadcrumbs.map((b: any) => b.name)
-      expect(names).toStrictEqual(['b', 'c'])
-    })
-
-    it('captures console output as log breadcrumbs', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production' })
-      console.log('hello', 'world')
-      console.warn({ a: 1 })
-      Bugsnag.notify(new Error('x'))
-      const crumbs = firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')
-      expect(crumbs).toHaveLength(2)
-      expect(crumbs[0].name).toBe('Console output')
-      expect(crumbs[0].metaData).toStrictEqual({ '[0]': 'hello', '[1]': 'world', severity: 'log' })
-      expect(crumbs[1].metaData).toStrictEqual({ '[0]': '{"a":1}', severity: 'warn' })
-    })
-
-    it('does not capture console output in development', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'development' })
-      console.log('hello')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')).toHaveLength(0)
-    })
-
-    it('respects enabledBreadcrumbTypes', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production', enabledBreadcrumbTypes: ['manual'] })
-      console.log('hello')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')).toHaveLength(0)
     })
   })
 
@@ -412,12 +345,12 @@ describe('browser-lite behaviour', () => {
       expect(device.windowHeight).toBe(window.innerHeight)
     })
 
-    it('does not generate or persist an anonymous id, and does not set a user id', () => {
+    it('does not generate or persist an anonymous id', () => {
       const { Bugsnag, captured } = start()
       Bugsnag.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()
-      expect(event.user.id).toBeUndefined()
+      expect(event.user).toBeUndefined()
       expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
     })
 
@@ -426,7 +359,7 @@ describe('browser-lite behaviour', () => {
       client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()
-      expect(event.user.id).toBeUndefined()
+      expect(event.user).toBeUndefined()
       expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
     })
   })
@@ -439,7 +372,7 @@ describe('browser-lite behaviour', () => {
       Bugsnag.notify(new Error('2'))
       Bugsnag.notify(new Error('3'))
       expect(captured).toHaveLength(2)
-      expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('maxEvents per session limit'))
+      expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('maxEvents limit'))
 
       Bugsnag.resetEventCount()
       Bugsnag.notify(new Error('4'))
@@ -483,16 +416,8 @@ describe('browser-lite behaviour', () => {
       expect(captured).toHaveLength(0)
     })
 
-    it('uses the secondary endpoint for API keys starting with 00000', () => {
-      const captured = mockDelivery()
-      const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: '00000abc000000000000000000000000', sendPayloadChecksums: false })
-      Bugsnag.notify(new Error('x'))
-      expect(captured[0].url).toBe('https://notify.bugsnag.smartbear.com')
-    })
-
     it('reports an error when endpoint configuration is incomplete', () => {
-      const { Bugsnag } = start({ endpoints: { notify: 'https://notify.custom.com' } })
+      const { Bugsnag } = start({ endpoints: {} })
       Bugsnag.notify(new Error('x'), undefined, (err) => {
         expect(err).toStrictEqual(new Error('Event not sent due to incomplete endpoint configuration'))
       })

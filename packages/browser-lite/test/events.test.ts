@@ -32,39 +32,18 @@ describe('event public API', () => {
       expect(classesFor(['s', 1, false])).toStrictEqual(['Error', 'Error', 'Error'])
     })
 
-    it('treats null, undefined, functions and plain objects as invalid errors', () => {
+    it('coerces null, undefined, functions and plain objects to errors', () => {
       expect(classesFor([null, undefined, () => {}, {}])).toStrictEqual([
-        'InvalidError', 'InvalidError', 'InvalidError', 'InvalidError'
+        'Error', 'Error', 'Error', 'Error'
       ])
     })
 
-    it('accepts error-like objects', () => {
+    it('reports the stringified value as the message', () => {
       const { Bugsnag, captured } = start()
-      Bugsnag.notify({ name: 'Custom', message: 'oops' })
-      Bugsnag.notify({ errorClass: 'C', errorMessage: 'm' })
-      expect(captured.map(c => c.body.events[0].exceptions[0])).toStrictEqual([
-        expect.objectContaining({ errorClass: 'Custom', errorMessage: 'oops' }),
-        expect.objectContaining({ errorClass: 'C', errorMessage: 'm' })
-      ])
-    })
-
-    it('includes the cause chain as additional exceptions', () => {
-      const cause = new Error('inner')
-      const err: any = new Error('outer')
-      err.cause = cause
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(err)
-      const exceptions = firstEvent(captured).exceptions
-      expect(exceptions).toHaveLength(2)
-      expect(exceptions[1].errorMessage).toBe('inner')
-    })
-
-    it('records metadata for a cause that is not a valid error', () => {
-      const err: any = new Error('outer')
-      err.cause = {}
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(err)
-      expect(firstEvent(captured).metaData['error cause']).toStrictEqual({})
+      Bugsnag.notify('a string problem' as any)
+      Bugsnag.notify(42 as any)
+      const messages = captured.map(c => c.body.events[0].exceptions[0].errorMessage)
+      expect(messages).toStrictEqual(['a string problem', '42'])
     })
   })
 
@@ -177,7 +156,7 @@ describe('event public API', () => {
 
   describe('payload', () => {
     it('serialises to the version 4 payload shape', () => {
-      const { client, captured } = createClient({ appVersion: '1.2.3', user: { id: 'u' } })
+      const { client, captured } = createClient({ appVersion: '1.2.3' })
       client.setContext('ctx')
       client.notify(new Error('boom'))
       const event = firstEvent(captured)
@@ -188,15 +167,7 @@ describe('event public API', () => {
       expect(event.app).toStrictEqual({ releaseStage: 'development', version: '1.2.3', type: 'browser' })
       expect(event.request.url).toBe(window.location.href)
       expect(event.context).toBe('ctx')
-      expect(event.user).toStrictEqual({ id: 'u' })
-      expect(event.session).toBeUndefined()
       expect(event.exceptions[0]).toStrictEqual(expect.objectContaining({ errorClass: 'Error', message: 'boom' }))
-    })
-
-    it('records trace correlation set in onError', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any) => event.setTraceCorrelation('t', 's'))
-      expect(firstEvent(captured).correlation).toStrictEqual({ traceId: 't', spanId: 's' })
     })
 
     it('redacts keys matching a regex', () => {
@@ -274,41 +245,25 @@ describe('event public API', () => {
   })
 
   describe('event helpers in onError', () => {
-    it('exposes metadata, feature flag, user, correlation and grouping helpers', () => {
+    it('exposes metadata helpers', () => {
       const { Bugsnag, captured } = start()
       Bugsnag.notify(new Error('x'), (event: any) => {
         event.addMetadata('site', { id: 's1' })
         event.addMetadata('site', 'app', 'example')
         expect(event.getMetadata('site', 'id')).toBe('s1')
         event.clearMetadata('site', 'id')
-        event.addFeatureFlag('f1', 'v1')
-        event.addFeatureFlags([{ name: 'f2' }])
-        event.clearFeatureFlag('f1')
-        event.setUser('u', 'e', 'n')
-        event.setTraceCorrelation('trace')
-        event.setGroupingDiscriminator('g')
-        expect(event.getFeatureFlags()).toStrictEqual([{ featureFlag: 'f2' }])
-        expect(event.getUser()).toStrictEqual({ id: 'u', email: 'e', name: 'n' })
-        expect(event.getGroupingDiscriminator()).toBe('g')
       })
       const event = firstEvent(captured)
       expect(event.metaData.site).toStrictEqual({ app: 'example' })
-      expect(event.featureFlags).toStrictEqual([{ featureFlag: 'f2' }])
-      expect(event.user).toStrictEqual({ id: 'u', email: 'e', name: 'n' })
-      expect(event.correlation).toStrictEqual({ traceId: 'trace' })
-      expect(event.groupingDiscriminator).toBe('g')
     })
 
-    it('can clear all feature flags and metadata', () => {
+    it('can clear all metadata', () => {
       const { Bugsnag, captured } = start()
       Bugsnag.notify(new Error('x'), (event: any) => {
-        event.addFeatureFlag('a')
-        event.clearFeatureFlags()
         event.addMetadata('s', { a: 1 })
         event.clearMetadata('s')
       })
       const event = firstEvent(captured)
-      expect(event.featureFlags).toStrictEqual([])
       expect(event.metaData.s).toBeUndefined()
     })
   })

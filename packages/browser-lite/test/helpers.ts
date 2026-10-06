@@ -42,7 +42,7 @@ export function getBugsnag (): any {
 export function start (opts: any = {}): { Bugsnag: any, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()
-  Bugsnag.start({ apiKey: API_KEY, sendPayloadChecksums: false, ...opts })
+  Bugsnag.start({ apiKey: API_KEY, ...opts })
   return { Bugsnag, captured }
 }
 
@@ -50,7 +50,7 @@ export function start (opts: any = {}): { Bugsnag: any, captured: Captured[] } {
 export function createClient (opts: any = {}): { Bugsnag: any, client: any, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()
-  const client = Bugsnag.createClient({ apiKey: API_KEY, sendPayloadChecksums: false, ...opts })
+  const client = Bugsnag.createClient({ apiKey: API_KEY, ...opts })
   return { Bugsnag, client, captured }
 }
 

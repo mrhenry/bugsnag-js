@@ -15,7 +15,7 @@ function fireRejection (reason: any, detail?: any) {
   window.dispatchEvent(evt)
 }
 
-describe('plugins public API', () => {
+describe('automatic capture public API', () => {
   let rejectionListeners: any[] = []
   let originalAddEventListener: any
 
@@ -80,20 +80,6 @@ describe('plugins public API', () => {
       expect(firstEvent(captured).exceptions[0].errorMessage).toBe('legacy msg')
     })
 
-    it('captures jQuery-style synthetic events and their metadata', () => {
-      const { captured } = start()
-      ;(window as any).onerror({ type: 'click', message: 'clicked' }, { extra: 1 })
-      const event = firstEvent(captured)
-      expect(event.exceptions[0].errorClass).toBe('Event: click')
-      expect(event.metaData['window onerror']).toBeDefined()
-    })
-
-    it('uses a synthetic event detail as the message when there is no message', () => {
-      const { captured } = start()
-      ;(window as any).onerror({ detail: 'detailed' }, { extra: 1 })
-      expect(firstEvent(captured).exceptions[0].errorMessage).toBe('detailed')
-    })
-
     it('decorates a frame column from the charNo argument', () => {
       const { captured } = start()
       const err: any = new Error('boom')
@@ -147,12 +133,6 @@ describe('plugins public API', () => {
       expect(firstEvent(captured).unhandled).toBe(false)
     })
 
-    it('handles Bluebird-style rejection details', () => {
-      const { captured } = start()
-      fireRejection(undefined, { reason: new Error('bluebird') })
-      expect(firstEvent(captured).exceptions[0].errorMessage).toBe('bluebird')
-    })
-
     it('adds metadata for a non-error reason without a stack', () => {
       const { captured } = start()
       const err: any = new Error('no stack')
@@ -161,68 +141,18 @@ describe('plugins public API', () => {
       expect(firstEvent(captured).metaData['unhandledRejection handler']).toBeDefined()
     })
 
-    it('reports a non-error rejection reason as an invalid error', () => {
+    it('coerces a non-error rejection reason to an error', () => {
       const { captured } = start()
       fireRejection('a string reason')
-      expect(firstEvent(captured).exceptions[0].errorClass).toBe('InvalidError')
+      const exception = firstEvent(captured).exceptions[0]
+      expect(exception.errorClass).toBe('Error')
+      expect(exception.errorMessage).toBe('a string reason')
     })
 
     it('does nothing when enabledErrorTypes.unhandledRejections is false', () => {
       const { captured } = start({ enabledErrorTypes: { unhandledRejections: false } })
       fireRejection(new Error('rejected'))
       expect(captured).toHaveLength(0)
-    })
-  })
-
-  describe('console breadcrumbs', () => {
-    it('captures console output as log breadcrumbs in production', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production' })
-      console.log('hello', 'world')
-      console.warn({ a: 1 })
-      Bugsnag.notify(new Error('x'))
-      const crumbs = firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')
-      expect(crumbs).toHaveLength(2)
-      expect(crumbs[0].name).toBe('Console output')
-      expect(crumbs[0].metaData).toStrictEqual({ '[0]': 'hello', '[1]': 'world', severity: 'log' })
-      expect(crumbs[1].metaData).toStrictEqual({ '[0]': '{"a":1}', severity: 'warn' })
-    })
-
-    it('stringifies null-prototype objects safely', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production' })
-      console.log(Object.create(null))
-      Bugsnag.notify(new Error('x'))
-      const crumb = firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')[0]
-      expect(crumb.metaData['[0]']).toBe('[Unknown value]')
-    })
-
-    it('does not capture console output in development', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'development' })
-      console.log('hello')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')).toHaveLength(0)
-    })
-
-    it('does not capture console output when log breadcrumbs are disabled', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production', enabledBreadcrumbTypes: ['manual'] })
-      console.log('hello')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')).toHaveLength(0)
-    })
-
-    it('does not wrap console.group', () => {
-      const realGroup = (console as any).group
-      const group = jest.fn()
-      ;(console as any).group = group
-      try {
-        const { Bugsnag, captured } = start({ releaseStage: 'production' })
-        ;(console as any).group('hello', 'world')
-        Bugsnag.notify(new Error('x'))
-        expect(group).toHaveBeenCalledWith('hello', 'world')
-        expect(firstEvent(captured).breadcrumbs.filter((b: any) => b.type === 'log')).toHaveLength(0)
-      } finally {
-        if (realGroup === undefined) delete (console as any).group
-        else (console as any).group = realGroup
-      }
     })
   })
 
@@ -280,24 +210,12 @@ describe('plugins public API', () => {
       }
     })
 
-    it('falls back through the legacy navigator language properties', () => {
-      const nav = window.navigator as any
-      Object.defineProperty(nav, 'browserLanguage', { value: 'en-GB', configurable: true })
-      try {
-        const { Bugsnag, captured } = start()
-        Bugsnag.notify(new Error('x'))
-        expect(firstEvent(captured).device.locale).toBe('en-GB')
-      } finally {
-        delete nav.browserLanguage
-      }
-    })
-
-    it('does not generate or persist an anonymous id, and does not set a user id', () => {
+    it('does not generate or persist an anonymous id', () => {
       const { Bugsnag, captured } = start()
       Bugsnag.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()
-      expect(event.user.id).toBeUndefined()
+      expect(event.user).toBeUndefined()
       expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
     })
 
@@ -306,7 +224,7 @@ describe('plugins public API', () => {
       client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()
-      expect(event.user.id).toBeUndefined()
+      expect(event.user).toBeUndefined()
       expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
     })
   })

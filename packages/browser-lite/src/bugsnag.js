@@ -5,7 +5,7 @@
  *
  * This is a clean-sheet, dependency-free implementation written in ES3. It
  * bundles everything the notifier needs: configuration, the client, events,
- * breadcrumbs, the browser plugins and XMLHttpRequest delivery.
+ * automatic capture and XMLHttpRequest delivery.
  *
  * See SPEC.md for the full behaviour specification.
  */
@@ -15,12 +15,6 @@
   var name = 'Bugsnag JavaScript'
   var version = '__VERSION__'
   var url = 'https://github.com/bugsnag/bugsnag-js'
-
-  var SECONDARY_ENDPOINT_API_KEY_PREFIX = '00000'
-  var SECONDARY_NOTIFY_ENDPOINT = 'https://notify.bugsnag.smartbear.com'
-  var SECONDARY_SESSIONS_ENDPOINT = 'https://sessions.bugsnag.smartbear.com'
-
-  var BREADCRUMB_TYPES = ['navigation', 'request', 'process', 'log', 'user', 'state', 'error', 'manual']
 
   function noop () {}
 
@@ -74,11 +68,6 @@
     return false
   }
 
-  function indexOf (arr, x) {
-    for (var i = 0; i < arr.length; i++) if (arr[i] === x) return i
-    return -1
-  }
-
   function trim (str) {
     return str.replace(/^\s+|\s+$/g, '')
   }
@@ -98,10 +87,6 @@
   var MAX_EDGES = 25000
   var MIN_PRESERVED_DEPTH = 8
   var REPLACEMENT_NODE = '...'
-
-  function isErrorObject (o) {
-    return o instanceof Error || /^\[object (Error|(Dom)?Exception)\]$/.test(Object.prototype.toString.call(o))
-  }
 
   function throwsMessage (err) {
     return '[Throws: ' + err.message + ']'
@@ -162,7 +147,7 @@
         }
       }
 
-      if (isErrorObject(obj)) {
+      if (isError(obj)) {
         edges--
         var eResult = visit({ name: obj.name, message: obj.message }, path)
         seen.pop()
@@ -257,52 +242,6 @@
     }
   }
 
-  var featureFlagDelegate = {
-    add: function (existingFeatures, existingFeatureKeys, name, variant) {
-      if (typeof name !== 'string') return
-
-      if (variant === undefined) {
-        variant = null
-      } else if (variant !== null && typeof variant !== 'string') {
-        variant = safeJsonStringify(variant, null, null, {})
-      }
-
-      var existingIndex = existingFeatureKeys[name]
-      if (typeof existingIndex === 'number') {
-        existingFeatures[existingIndex] = { name: name, variant: variant }
-        return
-      }
-
-      existingFeatures.push({ name: name, variant: variant })
-      existingFeatureKeys[name] = existingFeatures.length - 1
-    },
-    merge: function (existingFeatures, newFeatures, existingFeatureKeys) {
-      if (!isArray(newFeatures)) return
-
-      for (var i = 0; i < newFeatures.length; ++i) {
-        var feature = newFeatures[i]
-        if (feature === null || typeof feature !== 'object') continue
-        featureFlagDelegate.add(existingFeatures, existingFeatureKeys, feature.name, feature.variant)
-      }
-
-      return existingFeatures
-    },
-    toEventApi: function (featureFlags) {
-      return mapArray(filterArray(featureFlags, Boolean), function (feature) {
-        var flag = { featureFlag: feature.name }
-        if (typeof feature.variant === 'string') flag.variant = feature.variant
-        return flag
-      })
-    },
-    clear: function (features, featuresIndex, name) {
-      var existingIndex = featuresIndex[name]
-      if (typeof existingIndex === 'number') {
-        features[existingIndex] = null
-        delete featuresIndex[name]
-      }
-    }
-  }
-
   /* -------------------------------------------------------------------------
    * validators
    * ---------------------------------------------------------------------- */
@@ -372,34 +311,19 @@
       message: 'should be a function or array of functions',
       validate: listOfFunctions
     },
-    onSession: {
-      defaultValue: function () { return [] },
-      message: 'should be a function or array of functions',
-      validate: listOfFunctions
-    },
-    onBreadcrumb: {
-      defaultValue: function () { return [] },
-      message: 'should be a function or array of functions',
-      validate: listOfFunctions
-    },
     endpoints: {
       defaultValue: function (endpoints) {
         if (typeof endpoints === 'undefined') {
-          return { notify: 'https://notify.bugsnag.com', sessions: 'https://sessions.bugsnag.com' }
+          return { notify: 'https://notify.bugsnag.com' }
         }
-        return { notify: null, sessions: null }
+        return { notify: null }
       },
-      message: 'should be an object containing endpoint URLs { notify, sessions }',
+      message: 'should be an object containing the endpoint URL { notify }',
       validate: function (val) {
         return (val && typeof val === 'object') &&
-          stringWithLength(val.notify) && stringWithLength(val.sessions) &&
-          filterArray(keys(val), function (k) { return !includes(['notify', 'sessions'], k) }).length === 0
+          stringWithLength(val.notify) &&
+          filterArray(keys(val), function (k) { return !includes(['notify'], k) }).length === 0
       }
-    },
-    autoTrackSessions: {
-      defaultValue: function () { return true },
-      message: 'should be true|false',
-      validate: function (val) { return val === true || val === false }
     },
     enabledReleaseStages: {
       defaultValue: function () { return null },
@@ -416,34 +340,10 @@
       message: 'should be a string',
       validate: function (value) { return typeof value === 'string' && value.length }
     },
-    maxBreadcrumbs: {
-      defaultValue: function () { return 25 },
-      message: 'should be a number <=100',
-      validate: function (value) { return intRange(0, 100)(value) }
-    },
-    enabledBreadcrumbTypes: {
-      defaultValue: function () { return BREADCRUMB_TYPES },
-      message: 'should be null or a list of available breadcrumb types (' + BREADCRUMB_TYPES.join(',') + ')',
-      validate: function (value) {
-        return value === null || (isArray(value) && reduceArray(value, function (accum, maybeType) {
-          if (accum === false) return accum
-          return includes(BREADCRUMB_TYPES, maybeType)
-        }, true))
-      }
-    },
     context: {
       defaultValue: function () { return undefined },
       message: 'should be a string',
       validate: function (value) { return value === undefined || typeof value === 'string' }
-    },
-    user: {
-      defaultValue: function () { return {} },
-      message: 'should be an object with { id, email, name } properties',
-      validate: function (value) {
-        return (value === null) || (value && reduceArray(keys(value), function (accum, key) {
-          return accum && includes(['id', 'email', 'name'], key)
-        }, true))
-      }
     },
     metadata: {
       defaultValue: function () { return {} },
@@ -472,33 +372,15 @@
         }).length
       }
     },
-    plugins: {
-      defaultValue: function () { return [] },
-      message: 'should be an array of plugin objects',
-      validate: function (value) {
-        return isArray(value) && value.length === filterArray(value, function (p) {
-          return p && typeof p === 'object' && typeof p.load === 'function'
-        }).length
-      }
-    },
-    featureFlags: {
-      defaultValue: function () { return [] },
-      message: 'should be an array of objects that have a "name" property',
-      validate: function (value) {
-        return isArray(value) && value.length === filterArray(value, function (feature) {
-          return feature && typeof feature === 'object' && typeof feature.name === 'string'
-        }).length
-      }
-    },
     reportUnhandledPromiseRejectionsAsHandled: {
       defaultValue: function () { return false },
       message: 'should be true|false',
       validate: function (value) { return value === true || value === false }
     },
-    sendPayloadChecksums: {
-      defaultValue: function () { return false },
-      message: 'should be true|false',
-      validate: function (value) { return value === true || value === false }
+    maxEvents: {
+      defaultValue: function () { return 10 },
+      message: 'should be a positive integer <=100',
+      validate: function (val) { return intRange(1, 100)(val) }
     }
   }
 
@@ -636,70 +518,21 @@
     }
   }
 
-  function getCauseStack (error) {
-    if (error.cause) return [error].concat(getCauseStack(error.cause))
-    return [error]
-  }
-
-  function makeSerialisable (err) {
-    if (err === null) return 'null'
-    if (err === undefined) return 'undefined'
-    return err
-  }
-
-  function hasNecessaryFields (error) {
-    return (typeof error.name === 'string' || typeof error.errorClass === 'string') &&
-      (typeof error.message === 'string' || typeof error.errorMessage === 'string')
-  }
-
-  function normaliseError (maybeError, tolerateNonErrors, component, logger) {
+  function normaliseError (maybeError) {
     var error
-    var internalFrames = 0
-
-    var createAndLogInputError = function (reason) {
-      var verb = (component === 'error cause' ? 'was' : 'received')
-      if (logger) logger.warn(component + ' ' + verb + ' a non-error: "' + reason + '"')
-      var err = new Error(component + ' ' + verb + ' a non-error. See "' + component + '" tab for more detail.')
-      err.name = 'InvalidError'
-      return err
-    }
-
-    if (!tolerateNonErrors) {
-      if (isError(maybeError)) {
-        error = maybeError
-      } else {
-        error = createAndLogInputError(typeof maybeError)
-        internalFrames += 2
-      }
+    if (isError(maybeError)) {
+      error = maybeError
     } else {
-      switch (typeof maybeError) {
-        case 'string':
-        case 'number':
-        case 'boolean':
-          error = new Error(String(maybeError))
-          internalFrames += 1
-          break
-        case 'function':
-          error = createAndLogInputError('function')
-          internalFrames += 2
-          break
-        case 'object':
-          if (maybeError !== null && isError(maybeError)) {
-            error = maybeError
-          } else if (maybeError !== null && hasNecessaryFields(maybeError)) {
-            error = new Error(maybeError.message || maybeError.errorMessage)
-            error.name = maybeError.name || maybeError.errorClass
-            internalFrames += 1
-          } else {
-            error = createAndLogInputError(maybeError === null ? 'null' : 'unsupported object')
-            internalFrames += 2
-          }
-          break
-        default:
-          error = createAndLogInputError('nothing')
-          internalFrames += 2
+      var message
+      try {
+        message = String(maybeError)
+      } catch (e) {
+        message = '[unserialisable]'
       }
+      error = new Error(message)
     }
+
+    var internalFrames = 0
 
     if (!hasStack(error)) {
       try {
@@ -716,57 +549,6 @@
   }
 
   /* -------------------------------------------------------------------------
-   * Breadcrumb / Session
-   * ---------------------------------------------------------------------- */
-
-  function Breadcrumb (message, metadata, type, timestamp) {
-    this.type = type
-    this.message = message
-    this.metadata = metadata
-    this.timestamp = timestamp || new Date()
-  }
-
-  Breadcrumb.prototype.toJSON = function () {
-    return {
-      type: this.type,
-      name: this.message,
-      timestamp: this.timestamp,
-      metaData: this.metadata
-    }
-  }
-
-  function cuid () {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-      var r = Math.random() * 16 | 0
-      var v = c === 'x' ? r : (r & 0x3 | 0x8)
-      return v.toString(16)
-    })
-  }
-
-  function Session () {
-    this.id = cuid()
-    this.startedAt = new Date()
-    this._handled = 0
-    this._unhandled = 0
-    this._user = {}
-    this.app = {}
-    this.device = {}
-  }
-
-  Session.prototype.getUser = function () { return this._user }
-  Session.prototype.setUser = function (id, email, name) { this._user = { id: id, email: email, name: name } }
-  Session.prototype.toJSON = function () {
-    return {
-      id: this.id,
-      startedAt: this.startedAt,
-      events: { handled: this._handled, unhandled: this._unhandled }
-    }
-  }
-  Session.prototype._track = function (event) {
-    this[event._handledState.unhandled ? '_unhandled' : '_handled'] += 1
-  }
-
-  /* -------------------------------------------------------------------------
    * Event
    * ---------------------------------------------------------------------- */
 
@@ -774,9 +556,7 @@
     if (stacktrace === undefined) stacktrace = []
     if (handledState === undefined) handledState = defaultHandledState()
 
-    this.apiKey = undefined
     this.context = undefined
-    this.groupingHash = undefined
     this.originalError = originalError
 
     this._handledState = handledState
@@ -786,18 +566,8 @@
     this.app = {}
     this.device = {}
     this.request = {}
-    this.response = {}
-
-    this.breadcrumbs = []
-    this.threads = []
 
     this._metadata = {}
-    this._features = []
-    this._featuresIndex = {}
-    this._user = {}
-    this._session = undefined
-    this._correlation = undefined
-    this._groupingDiscriminator = undefined
 
     this.errors = [
       createBugsnagError(errorClass, errorMessage, Event.__type, stacktrace)
@@ -808,21 +578,6 @@
     return metadataDelegate.add(this._metadata, section, keyOrObj, maybeVal)
   }
 
-  Event.prototype.setTraceCorrelation = function (traceId, spanId) {
-    if (typeof traceId === 'string') {
-      this._correlation = { traceId: traceId }
-      if (typeof spanId === 'string') this._correlation.spanId = spanId
-    }
-  }
-
-  Event.prototype.getGroupingDiscriminator = function () { return this._groupingDiscriminator }
-
-  Event.prototype.setGroupingDiscriminator = function (value) {
-    var previousValue = this._groupingDiscriminator
-    if (typeof value === 'string' || value === null || value === undefined) this._groupingDiscriminator = value
-    return previousValue
-  }
-
   Event.prototype.getMetadata = function (section, key) {
     return metadataDelegate.get(this._metadata, section, key)
   }
@@ -830,31 +585,6 @@
   Event.prototype.clearMetadata = function (section, key) {
     return metadataDelegate.clear(this._metadata, section, key)
   }
-
-  Event.prototype.addFeatureFlag = function (name, variant) {
-    if (variant === undefined) variant = null
-    featureFlagDelegate.add(this._features, this._featuresIndex, name, variant)
-  }
-
-  Event.prototype.addFeatureFlags = function (featureFlags) {
-    featureFlagDelegate.merge(this._features, featureFlags, this._featuresIndex)
-  }
-
-  Event.prototype.getFeatureFlags = function () {
-    return featureFlagDelegate.toEventApi(this._features)
-  }
-
-  Event.prototype.clearFeatureFlag = function (name) {
-    featureFlagDelegate.clear(this._features, this._featuresIndex, name)
-  }
-
-  Event.prototype.clearFeatureFlags = function () {
-    this._features = []
-    this._featuresIndex = {}
-  }
-
-  Event.prototype.getUser = function () { return this._user }
-  Event.prototype.setUser = function (id, email, name) { this._user = { id: id, email: email, name: name } }
 
   Event.prototype.toJSON = function () {
     return {
@@ -866,16 +596,8 @@
       app: this.app,
       device: this.device,
       request: this.request,
-      response: this.response,
-      breadcrumbs: this.breadcrumbs,
       context: this.context,
-      groupingHash: this.groupingHash,
-      groupingDiscriminator: this._groupingDiscriminator,
-      metaData: this._metadata,
-      user: this._user,
-      session: this._session,
-      featureFlags: this.getFeatureFlags(),
-      correlation: this._correlation
+      metaData: this._metadata
     }
   }
 
@@ -884,10 +606,10 @@
     return generateStack().slice(1 + backtraceFramesToSkip)
   }
 
-  Event.create = function (maybeError, tolerateNonErrors, handledState, component, errorFramesToSkip, logger) {
+  Event.create = function (maybeError, handledState, errorFramesToSkip) {
     if (errorFramesToSkip === undefined) errorFramesToSkip = 0
 
-    var normalised = normaliseError(maybeError, tolerateNonErrors, component, logger)
+    var normalised = normaliseError(maybeError)
     var error = normalised[0]
     var internalFrames = normalised[1]
 
@@ -901,21 +623,6 @@
       event = new Event(error.name, error.message, stacktrace, handledState, maybeError)
     } catch (e) {
       event = new Event(error.name, error.message, [], handledState, maybeError)
-    }
-
-    if (error.name === 'InvalidError') {
-      event.addMetadata('' + component, 'non-error parameter', makeSerialisable(maybeError))
-    }
-
-    if (error.cause) {
-      var causes = getCauseStack(error).slice(1)
-      var normalisedCauses = mapArray(causes, function (cause) {
-        var stacktrace = (isError(cause) && hasStack(cause)) ? parseStack(cause) : []
-        var normalisedCause = normaliseError(cause, true, 'error cause', logger)[0]
-        if (normalisedCause.name === 'InvalidError') event.addMetadata('error cause', makeSerialisable(cause))
-        return createBugsnagError(normalisedCause.name, normalisedCause.message, Event.__type, stacktrace)
-      })
-      for (var ci = 0; ci < normalisedCauses.length; ci++) event.errors.push(normalisedCauses[ci])
     }
 
     return event
@@ -978,61 +685,27 @@
     asyncEvery(callbacks, runMaybeAsyncCallback, cb)
   }
 
-  function runSyncCallbacks (callbacks, callbackArg, callbackType, logger) {
-    var ignore = false
-    var cbs = callbacks.slice()
-    while (!ignore) {
-      if (!cbs.length) break
-      try {
-        ignore = cbs.pop()(callbackArg) === false
-      } catch (e) {
-        logger.error('Error occurred in ' + callbackType + ' callback, continuing anyway…')
-        logger.error(e)
-      }
-    }
-    return ignore
-  }
-
   /* -------------------------------------------------------------------------
    * Client
    * ---------------------------------------------------------------------- */
 
-  function Client (configuration, schema, internalPlugins, notifier) {
-    if (schema === undefined) schema = configSchema
-    if (internalPlugins === undefined) internalPlugins = []
-
+  function Client (configuration, notifier) {
     this._notifier = notifier
 
     this._config = {}
-    this._schema = schema
 
-    this._delivery = { sendSession: noop, sendEvent: noop }
+    this._delivery = { sendEvent: noop }
     this._logger = { debug: noop, info: noop, warn: noop, error: noop }
 
-    this._plugins = {}
-
-    this._breadcrumbs = []
-    this._session = null
     this._metadata = {}
-    this._featuresIndex = {}
-    this._features = []
     this._context = undefined
-    this._user = {}
-    this._groupingDiscriminator = undefined
 
-    this._cbs = { e: [], s: [], sp: [], b: [] }
+    this._cbs = { e: [] }
 
     this.Client = Client
     this.Event = Event
-    this.Breadcrumb = Breadcrumb
-    this.Session = Session
 
-    this._config = this._configure(configuration, internalPlugins)
-
-    var plugins = internalPlugins.concat(this._config.plugins)
-    for (var i = 0; i < plugins.length; i++) {
-      if (plugins[i]) this._loadPlugin(plugins[i])
-    }
+    this._config = this._configure(configuration)
 
     this._depth = 1
 
@@ -1043,27 +716,17 @@
     }
   }
 
-  Client.prototype._configure = function (opts, internalPlugins) {
-    var schema = reduceArray(internalPlugins, function (s, plugin) {
-      if (plugin && plugin.configSchema) return assign({}, s, plugin.configSchema)
-      return s
-    }, this._schema)
-
-    // sendPayloadChecksums is true by default unless custom endpoints are specified
-    if (!opts.endpoints) {
-      opts.sendPayloadChecksums = 'sendPayloadChecksums' in opts ? opts.sendPayloadChecksums : true
-    }
-
-    var accum = reduceArray(keys(schema), function (accum, key) {
-      var defaultValue = schema[key].defaultValue(opts[key])
+  Client.prototype._configure = function (opts) {
+    var accum = reduceArray(keys(configSchema), function (accum, key) {
+      var defaultValue = configSchema[key].defaultValue(opts[key])
 
       if (opts[key] !== undefined) {
-        var valid = schema[key].validate(opts[key])
+        var valid = configSchema[key].validate(opts[key])
         if (!valid) {
-          accum.errors[key] = schema[key].message
+          accum.errors[key] = configSchema[key].message
           accum.config[key] = defaultValue
         } else {
-          if (schema[key].allowPartialObject) accum.config[key] = assign(defaultValue, opts[key])
+          if (configSchema[key].allowPartialObject) accum.config[key] = assign(defaultValue, opts[key])
           else accum.config[key] = opts[key]
         }
       } else {
@@ -1076,27 +739,14 @@
     var errors = accum.errors
     var config = accum.config
 
-    if (schema.apiKey) {
-      if (!config.apiKey) throw new Error('No Bugsnag API Key set')
-      if (!/^[0-9a-f]{32}$/i.test(config.apiKey)) errors.apiKey = 'should be a string of 32 hexadecimal characters'
-
-      if (opts.endpoints === undefined && config.apiKey.indexOf(SECONDARY_ENDPOINT_API_KEY_PREFIX) === 0) {
-        config.endpoints = {
-          notify: SECONDARY_NOTIFY_ENDPOINT,
-          sessions: SECONDARY_SESSIONS_ENDPOINT
-        }
-      }
-    }
+    if (!config.apiKey) throw new Error('No Bugsnag API Key set')
+    if (!/^[0-9a-f]{32}$/i.test(config.apiKey)) errors.apiKey = 'should be a string of 32 hexadecimal characters'
 
     this._metadata = assign({}, config.metadata)
-    featureFlagDelegate.merge(this._features, config.featureFlags, this._featuresIndex)
-    this._user = assign({}, config.user)
     this._context = config.context
     if (config.logger) this._logger = config.logger
 
     if (config.onError) this._cbs.e = this._cbs.e.concat(config.onError)
-    if (config.onBreadcrumb) this._cbs.b = this._cbs.b.concat(config.onBreadcrumb)
-    if (config.onSession) this._cbs.s = this._cbs.s.concat(config.onSession)
 
     if (keys(errors).length) {
       this._logger.warn(generateConfigErrorMessage(errors, opts))
@@ -1117,68 +767,11 @@
     return metadataDelegate.clear(this._metadata, section, key)
   }
 
-  Client.prototype.addFeatureFlag = function (featureName, variant) {
-    if (variant === undefined) variant = null
-    featureFlagDelegate.add(this._features, this._featuresIndex, featureName, variant)
-  }
-
-  Client.prototype.addFeatureFlags = function (featureFlags) {
-    featureFlagDelegate.merge(this._features, featureFlags, this._featuresIndex)
-  }
-
-  Client.prototype.clearFeatureFlag = function (featureName) {
-    featureFlagDelegate.clear(this._features, this._featuresIndex, featureName)
-  }
-
-  Client.prototype.clearFeatureFlags = function () {
-    this._features = []
-    this._featuresIndex = {}
-  }
-
   Client.prototype.getContext = function () { return this._context }
   Client.prototype.setContext = function (c) { this._context = c }
 
-  Client.prototype.getGroupingDiscriminator = function () { return this._groupingDiscriminator }
-
-  Client.prototype.setGroupingDiscriminator = function (value) {
-    var previousValue = this._groupingDiscriminator
-    if (typeof value === 'string' || value === null || value === undefined) this._groupingDiscriminator = value
-    return previousValue
-  }
-
-  Client.prototype.getUser = function () { return this._user }
-  Client.prototype.setUser = function (id, email, name) { this._user = { id: id, email: email, name: name } }
-
-  Client.prototype._loadPlugin = function (plugin) {
-    var result = plugin.load(this)
-    if (plugin.name) this._plugins['~' + plugin.name + '~'] = result
-  }
-
-  Client.prototype.getPlugin = function (pluginName) {
-    return this._plugins['~' + pluginName + '~']
-  }
-
   Client.prototype._setDelivery = function (d) {
     this._delivery = d(this)
-  }
-
-  Client.prototype.startSession = function () {
-    var session = new Session()
-
-    session.app.releaseStage = this._config.releaseStage
-    session.app.version = this._config.appVersion
-    session.app.type = this._config.appType
-
-    session._user = assign({}, this._user)
-
-    var ignore = runSyncCallbacks(this._cbs.s, session, 'onSession', this._logger)
-
-    if (ignore) {
-      this._logger.debug('Session not started due to onSession callback')
-      return this
-    }
-
-    return this._sessionDelegate.startSession(this, session)
   }
 
   Client.prototype.addOnError = function (fn, front) {
@@ -1189,64 +782,9 @@
     this._cbs.e = filterArray(this._cbs.e, function (f) { return f !== fn })
   }
 
-  Client.prototype._addOnSessionPayload = function (fn) {
-    this._cbs.sp.push(fn)
-  }
-
-  Client.prototype.addOnSession = function (fn) {
-    this._cbs.s.push(fn)
-  }
-
-  Client.prototype.removeOnSession = function (fn) {
-    this._cbs.s = filterArray(this._cbs.s, function (f) { return f !== fn })
-  }
-
-  Client.prototype.addOnBreadcrumb = function (fn, front) {
-    this._cbs.b[front ? 'unshift' : 'push'](fn)
-  }
-
-  Client.prototype.removeOnBreadcrumb = function (fn) {
-    this._cbs.b = filterArray(this._cbs.b, function (f) { return f !== fn })
-  }
-
-  Client.prototype.pauseSession = function () {
-    return this._sessionDelegate.pauseSession(this)
-  }
-
-  Client.prototype.resumeSession = function () {
-    return this._sessionDelegate.resumeSession(this)
-  }
-
-  Client.prototype.leaveBreadcrumb = function (message, metadata, type) {
-    message = typeof message === 'string' ? message : ''
-    type = (typeof type === 'string' && includes(BREADCRUMB_TYPES, type)) ? type : 'manual'
-    metadata = typeof metadata === 'object' && metadata !== null ? metadata : {}
-
-    if (!message) return
-
-    var crumb = new Breadcrumb(message, metadata, type)
-
-    var ignore = runSyncCallbacks(this._cbs.b, crumb, 'onBreadcrumb', this._logger)
-
-    if (ignore) {
-      this._logger.debug('Breadcrumb not attached due to onBreadcrumb callback')
-      return
-    }
-
-    this._breadcrumbs.push(crumb)
-    if (this._breadcrumbs.length > this._config.maxBreadcrumbs) {
-      this._breadcrumbs = this._breadcrumbs.slice(this._breadcrumbs.length - this._config.maxBreadcrumbs)
-    }
-  }
-
-  Client.prototype._isBreadcrumbTypeEnabled = function (type) {
-    var types = this._config.enabledBreadcrumbTypes
-    return types === null || includes(types, type)
-  }
-
   Client.prototype.notify = function (maybeError, onError, postReportCallback) {
     if (postReportCallback === undefined) postReportCallback = noop
-    var event = Event.create(maybeError, true, undefined, 'notify()', this._depth + 1, this._logger)
+    var event = Event.create(maybeError, undefined, this._depth + 1)
     this._notify(event, onError, postReportCallback)
   }
 
@@ -1262,10 +800,6 @@
     })
     event.context = event.context || this._context
     event._metadata = assign({}, event._metadata, this._metadata)
-    event._user = assign({}, event._user, this._user)
-    event.breadcrumbs = this._breadcrumbs.slice()
-    event.setGroupingDiscriminator(this._groupingDiscriminator)
-    featureFlagDelegate.merge(event._features, this._features, event._featuresIndex)
 
     if (this._config.enabledReleaseStages !== null && !includes(this._config.enabledReleaseStages, this._config.releaseStage)) {
       this._logger.warn('Event not sent due to releaseStage/enabledReleaseStages configuration')
@@ -1286,14 +820,6 @@
         return postReportCallback(null, event)
       }
 
-      if (self._isBreadcrumbTypeEnabled('error')) {
-        Client.prototype.leaveBreadcrumb.call(self, event.errors[0].errorClass, {
-          errorClass: event.errors[0].errorClass,
-          errorMessage: event.errors[0].errorMessage,
-          severity: event.severity
-        }, 'error')
-      }
-
       if (originalSeverity !== event.severity) {
         event._handledState.severityReason = { type: 'userCallbackSetSeverity' }
       }
@@ -1303,13 +829,8 @@
         event._handledState.unhandled = event.unhandled
       }
 
-      if (self._session) {
-        self._session._track(event)
-        event._session = self._session
-      }
-
       self._delivery.sendEvent({
-        apiKey: event.apiKey || self._config.apiKey,
+        apiKey: self._config.apiKey,
         notifier: self._notifier,
         events: [event]
       }, function (err) { postReportCallback(err, event) })
@@ -1336,86 +857,65 @@
   }
 
   /* -------------------------------------------------------------------------
-   * plugins
+   * automatic enrichment & capture
    * ---------------------------------------------------------------------- */
 
-  function devicePlugin (nav, win) {
+  function setupDevice (client, nav, win) {
     if (nav === undefined) nav = navigator
     if (win === undefined) win = window
 
-    return {
-      load: function (client) {
-        var device = {
-          locale: nav.browserLanguage || nav.systemLanguage || nav.userLanguage || nav.language,
-          userAgent: nav.userAgent
-        }
-
-        if (win && win.screen && win.screen.orientation && win.screen.orientation.type) {
-          device.orientation = win.screen.orientation.type
-        } else if (win && win.document) {
-          device.orientation =
-            win.document.documentElement.clientWidth > win.document.documentElement.clientHeight
-              ? 'landscape'
-              : 'portrait'
-        }
-
-        if (win && typeof win.innerWidth === 'number') device.windowWidth = win.innerWidth
-        if (win && typeof win.innerHeight === 'number') device.windowHeight = win.innerHeight
-
-        client.addOnError(function (event) {
-          event.device = assign({}, event.device, device, { time: new Date() })
-        }, true)
-      }
+    var device = {
+      locale: nav.language,
+      userAgent: nav.userAgent
     }
+
+    if (win && win.screen && win.screen.orientation && win.screen.orientation.type) {
+      device.orientation = win.screen.orientation.type
+    } else if (win && win.document) {
+      device.orientation =
+        win.document.documentElement.clientWidth > win.document.documentElement.clientHeight
+          ? 'landscape'
+          : 'portrait'
+    }
+
+    if (win && typeof win.innerWidth === 'number') device.windowWidth = win.innerWidth
+    if (win && typeof win.innerHeight === 'number') device.windowHeight = win.innerHeight
+
+    client.addOnError(function (event) {
+      event.device = assign({}, event.device, device, { time: new Date() })
+    }, true)
   }
 
-  function contextPlugin (win) {
+  function setupContext (client, win) {
     if (win === undefined) win = window
 
-    return {
-      load: function (client) {
-        client.addOnError(function (event) {
-          if (event.context !== undefined) return
-          event.context = win.location.pathname
-        }, true)
-      }
-    }
+    client.addOnError(function (event) {
+      if (event.context !== undefined) return
+      event.context = win.location.pathname
+    }, true)
   }
 
-  function requestPlugin (win) {
+  function setupRequest (client, win) {
     if (win === undefined) win = window
 
-    return {
-      load: function (client) {
-        client.addOnError(function (event) {
-          if (event.request && event.request.url) return
-          event.request = assign({}, event.request, { url: win.location.href })
-        }, true)
-      }
-    }
+    client.addOnError(function (event) {
+      if (event.request && event.request.url) return
+      event.request = assign({}, event.request, { url: win.location.href })
+    }, true)
   }
 
-  var throttlePlugin = {
-    load: function (client) {
-      var n = 0
+  function setupThrottle (client) {
+    var n = 0
 
-      client.addOnError(function (event) {
-        if (n >= client._config.maxEvents) {
-          client._logger.warn('Cancelling event send due to maxEvents per session limit of ' + client._config.maxEvents + ' being reached')
-          return false
-        }
-        n++
-      })
-
-      client.resetEventCount = function () { n = 0 }
-    },
-    configSchema: {
-      maxEvents: {
-        defaultValue: function () { return 10 },
-        message: 'should be a positive integer <=100',
-        validate: function (val) { return intRange(1, 100)(val) }
+    client.addOnError(function () {
+      if (n >= client._config.maxEvents) {
+        client._logger.warn('Cancelling event send due to maxEvents limit of ' + client._config.maxEvents + ' being reached')
+        return false
       }
-    }
+      n++
+    })
+
+    client.resetEventCount = function () { n = 0 }
   }
 
   function stripQueryString (str) {
@@ -1424,15 +924,13 @@
       : str
   }
 
-  var stripQueryStringPlugin = {
-    load: function (client) {
-      client.addOnError(function (event) {
-        var allFrames = reduceArray(event.errors, function (accum, er) { return accum.concat(er.stacktrace) }, [])
-        for (var i = 0; i < allFrames.length; i++) {
-          allFrames[i].file = stripQueryString(allFrames[i].file)
-        }
-      })
-    }
+  function setupStripQueryString (client) {
+    client.addOnError(function (event) {
+      var allFrames = reduceArray(event.errors, function (accum, er) { return accum.concat(er.stacktrace) }, [])
+      for (var i = 0; i < allFrames.length; i++) {
+        allFrames[i].file = stripQueryString(allFrames[i].file)
+      }
+    })
   }
 
   function isActualNumber (n) {
@@ -1453,177 +951,59 @@
     }
   }
 
-  function windowOnerrorPlugin (win, component) {
-    if (win === undefined) win = window
-    if (component === undefined) component = 'window onerror'
-
-    return {
-      load: function (client) {
-        if (!client._config.autoDetectErrors) return
-        if (!client._config.enabledErrorTypes.unhandledExceptions) return
-
-        var prevOnError = win.onerror
-
-        function onerror (messageOrEvent, url, lineNo, charNo, error) {
-          if (lineNo === 0 && /Script error\.?/.test(messageOrEvent)) {
-            client._logger.warn('Ignoring cross-domain or eval script error. See docs: https://tinyurl.com/yy3rn63z')
-          } else {
-            var handledState = { severity: 'error', unhandled: true, severityReason: { type: 'unhandledException' } }
-            var event
-
-            if (error) {
-              event = client.Event.create(error, true, handledState, component, 1)
-              decorateStack(event.errors[0].stacktrace, url, lineNo, charNo)
-            } else if (
-              (typeof messageOrEvent === 'object' && messageOrEvent !== null) &&
-              (!url || typeof url !== 'string') &&
-              !lineNo && !charNo && !error
-            ) {
-              var errName = messageOrEvent.type ? 'Event: ' + messageOrEvent.type : 'Error'
-              var errMessage = messageOrEvent.message || messageOrEvent.detail || ''
-              event = client.Event.create({ name: errName, message: errMessage }, true, handledState, component, 1)
-              event.originalError = messageOrEvent
-              event.addMetadata(component, { event: messageOrEvent, extraParameters: url })
-            } else {
-              event = client.Event.create(messageOrEvent, true, handledState, component, 1)
-              decorateStack(event.errors[0].stacktrace, url, lineNo, charNo)
-            }
-
-            client._notify(event)
-          }
-
-          try { prevOnError.apply(this, arguments) } catch (e) {}
-        }
-
-        win.onerror = onerror
-      }
-    }
-  }
-
-  function fixBluebirdStacktrace (error) {
-    return function (frame) {
-      if (frame.file === error.toString()) return
-      if (frame.method) frame.method = frame.method.replace(/^\s+/, '')
-    }
-  }
-
-  function unhandledRejectionPlugin (win) {
+  function setupWindowOnerror (client, win) {
     if (win === undefined) win = window
 
-    var listener
+    if (!client._config.autoDetectErrors) return
+    if (!client._config.enabledErrorTypes.unhandledExceptions) return
 
-    var plugin = {
-      load: function (client) {
-        if (!client._config.autoDetectErrors || !client._config.enabledErrorTypes.unhandledRejections) return
+    var prevOnError = win.onerror
 
-        listener = function (evt) {
-          var error = evt.reason
-          var isBluebird = false
-
-          try {
-            if (evt.detail && evt.detail.reason) {
-              error = evt.detail.reason
-              isBluebird = true
-            }
-          } catch (e) {}
-
-          var unhandled = !client._config.reportUnhandledPromiseRejectionsAsHandled
-
-          var event = client.Event.create(error, false, {
-            severity: 'error',
-            unhandled: unhandled,
-            severityReason: { type: 'unhandledPromiseRejection' }
-          }, 'unhandledrejection handler', 1, client._logger)
-
-          if (isBluebird) mapArray(event.errors[0].stacktrace, fixBluebirdStacktrace(error))
-
-          client._notify(event, function (event) {
-            if (isError(error) && !error.stack) {
-              var section = {}
-              section[Object.prototype.toString.call(error)] = {
-                name: error.name,
-                message: error.message,
-                code: error.code
-              }
-              event.addMetadata('unhandledRejection handler', section)
-            }
-          })
-        }
-
-        if ('addEventListener' in win) {
-          win.addEventListener('unhandledrejection', listener)
-        } else {
-          win.onunhandledrejection = function (reason, promise) {
-            listener({ detail: { reason: reason, promise: promise } })
-          }
-        }
+    function onerror (message, url, lineNo, charNo, error) {
+      if (lineNo === 0 && /Script error\.?/.test(message)) {
+        client._logger.warn('Ignoring cross-domain or eval script error. See docs: https://tinyurl.com/yy3rn63z')
+      } else {
+        var handledState = { severity: 'error', unhandled: true, severityReason: { type: 'unhandledException' } }
+        var event = client.Event.create(error || message, handledState, 1)
+        decorateStack(event.errors[0].stacktrace, url, lineNo, charNo)
+        client._notify(event)
       }
+
+      try { prevOnError.apply(this, arguments) } catch (e) {}
     }
 
-    if (process.env.NODE_ENV !== 'production') {
-      plugin.destroy = function (w) {
-        if (w === undefined) w = window
-        if (listener) {
-          if ('addEventListener' in w) {
-            w.removeEventListener('unhandledrejection', listener)
-          } else {
-            w.onunhandledrejection = null
-          }
-        }
-        listener = null
-      }
-    }
-
-    return plugin
+    win.onerror = onerror
   }
 
-  function consoleBreadcrumbsPlugin () {
-    var plugin = {
-      load: function (client) {
-        var isDev = /^(local-)?dev(elopment)?$/.test(client._config.releaseStage)
+  function setupUnhandledRejection (client, win) {
+    if (win === undefined) win = window
 
-        if (isDev || !client._isBreadcrumbTypeEnabled('log')) return
+    if (!client._config.autoDetectErrors || !client._config.enabledErrorTypes.unhandledRejections) return
 
-        var methods = filterArray(['log', 'debug', 'info', 'warn', 'error'], function (method) {
-          return typeof console !== 'undefined' && typeof console[method] === 'function'
-        })
+    var listener = function (evt) {
+      var error = evt.reason
+      var unhandled = !client._config.reportUnhandledPromiseRejectionsAsHandled
 
-        for (var i = 0; i < methods.length; i++) {
-          (function (method) {
-            var original = console[method]
-            console[method] = function () {
-              var args = arguments
-              var metadata = { severity: method }
-              for (var j = 0; j < args.length; j++) {
-                var arg = args[j]
-                var stringified = '[Unknown value]'
-                try { stringified = String(arg) } catch (e) {}
-                if (stringified === '[object Object]') {
-                  try { stringified = JSON.stringify(arg) } catch (e) {}
-                }
-                metadata['[' + j + ']'] = stringified
-              }
-              client.leaveBreadcrumb('Console output', metadata, 'log')
-              original.apply(console, args)
-            }
-            console[method]._restore = function () { console[method] = original }
-          })(methods[i])
-        }
-      }
-    }
+      var event = client.Event.create(error, {
+        severity: 'error',
+        unhandled: unhandled,
+        severityReason: { type: 'unhandledPromiseRejection' }
+      }, 1)
 
-    if (process.env.NODE_ENV !== 'production') {
-      plugin.destroy = function () {
-        var methods = ['log', 'debug', 'info', 'warn', 'error']
-        for (var i = 0; i < methods.length; i++) {
-          if (console[methods[i]] && typeof console[methods[i]]._restore === 'function') {
-            console[methods[i]]._restore()
+      client._notify(event, function (event) {
+        if (isError(error) && !error.stack) {
+          var section = {}
+          section[Object.prototype.toString.call(error)] = {
+            name: error.name,
+            message: error.message,
+            code: error.code
           }
+          event.addMetadata('unhandledRejection handler', section)
         }
-      }
+      })
     }
 
-    return plugin
+    win.addEventListener('unhandledrejection', listener)
   }
 
   /* -------------------------------------------------------------------------
@@ -1632,9 +1012,7 @@
 
   var EVENT_REDACTION_PATHS = [
     'events.[].metaData',
-    'events.[].breadcrumbs.[].metaData',
-    'events.[].request',
-    'events.[].response'
+    'events.[].request'
   ]
 
   function jsonPayloadEvent (event, redactedKeys) {
@@ -1646,26 +1024,6 @@
       payload = safeJsonStringify(event, null, null, { redactedPaths: EVENT_REDACTION_PATHS, redactedKeys: redactedKeys })
     }
     return payload
-  }
-
-  function toHex (buffer) {
-    var bytes = new Uint8Array(buffer)
-    var hex = ''
-    for (var i = 0; i < bytes.length; i++) {
-      var b = bytes[i].toString(16)
-      hex += b.length === 1 ? '0' + b : b
-    }
-    return hex
-  }
-
-  function getIntegrityHeaderValue (win, requestBody) {
-    if (win.isSecureContext && win.crypto && win.crypto.subtle && win.crypto.subtle.digest && typeof TextEncoder === 'function') {
-      var msgUint8 = new TextEncoder().encode(requestBody)
-      return win.crypto.subtle.digest('SHA-1', msgUint8).then(function (hashBuffer) {
-        return 'sha1 ' + toHex(hashBuffer)
-      })
-    }
-    return Promise.resolve()
   }
 
   function xmlHttpRequestDelivery (client, win) {
@@ -1702,26 +1060,15 @@
 
           req.open('POST', url)
           req.setRequestHeader('Content-Type', 'application/json')
-          req.setRequestHeader('Bugsnag-Api-Key', event.apiKey || client._config.apiKey)
+          req.setRequestHeader('Bugsnag-Api-Key', event.apiKey)
           req.setRequestHeader('Bugsnag-Payload-Version', '4')
           req.setRequestHeader('Bugsnag-Sent-At', (new Date()).toISOString())
 
-          if (client._config.sendPayloadChecksums && typeof Promise !== 'undefined' && Promise.toString().indexOf('[native code]') !== -1) {
-            getIntegrityHeaderValue(win, body).then(function (integrity) {
-              if (integrity) req.setRequestHeader('Bugsnag-Integrity', integrity)
-              req.send(body)
-            }).catch(function (err) {
-              client._logger.error(err)
-              req.send(body)
-            })
-          } else {
-            req.send(body)
-          }
+          req.send(body)
         } catch (e) {
           client._logger.error(e)
         }
-      },
-      sendSession: noop
+      }
     }
   }
 
@@ -1729,31 +1076,25 @@
    * static API
    * ---------------------------------------------------------------------- */
 
-  var UNSUPPORTED_METHODS = ['startSession', 'pauseSession', 'resumeSession']
-
   var Bugsnag = {
     _client: null,
     createClient: function (opts) {
       if (typeof opts === 'string') opts = { apiKey: opts }
       if (!opts) opts = {}
 
-      var internalPlugins = [
-        devicePlugin(),
-        contextPlugin(),
-        requestPlugin(),
-        throttlePlugin,
-        stripQueryStringPlugin,
-        windowOnerrorPlugin(),
-        unhandledRejectionPlugin(),
-        consoleBreadcrumbsPlugin()
-      ]
+      var bugsnag = new Client(opts, { name: name, version: version, url: url })
 
-      var bugsnag = new Client(opts, configSchema, internalPlugins, { name: name, version: version, url: url })
+      setupDevice(bugsnag)
+      setupContext(bugsnag)
+      setupRequest(bugsnag)
+      setupThrottle(bugsnag)
+      setupStripQueryString(bugsnag)
+      setupWindowOnerror(bugsnag)
+      setupUnhandledRejection(bugsnag)
 
       bugsnag._setDelivery(xmlHttpRequestDelivery)
 
       bugsnag._logger.debug('Loaded!')
-      bugsnag.leaveBreadcrumb('Bugsnag loaded', {}, 'state')
 
       return bugsnag
     },
@@ -1774,7 +1115,6 @@
   for (var si = 0; si < staticMethods.length; si++) {
     (function (m) {
       if (/^_/.test(m)) return
-      if (indexOf(UNSUPPORTED_METHODS, m) !== -1) return
       Bugsnag[m] = function () {
         if (!Bugsnag._client) return console.log('Bugsnag.' + m + '() was called before Bugsnag.start()')
         Bugsnag._client._depth += 1
