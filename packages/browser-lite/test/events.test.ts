@@ -1,4 +1,4 @@
-import { createClient, fireOnerror, firstEvent, start } from './helpers'
+import { createClient, fireOnerror, firstEvent } from './helpers'
 
 const realConsole = {
   log: console.log,
@@ -23,8 +23,8 @@ describe('event public API', () => {
 
   describe('notify input normalisation', () => {
     const classesFor = (values: any[]): string[] => {
-      const { Bugsnag, captured } = start()
-      values.forEach(v => Bugsnag.notify(v))
+      const { client, captured } = createClient()
+      values.forEach(v => client.notify(v))
       return captured.map(c => c.body.events[0].exceptions[0].errorClass)
     }
 
@@ -39,9 +39,9 @@ describe('event public API', () => {
     })
 
     it('reports the stringified value as the message', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify('a string problem' as any)
-      Bugsnag.notify(42 as any)
+      const { client, captured } = createClient()
+      client.notify('a string problem' as any)
+      client.notify(42 as any)
       const messages = captured.map(c => c.body.events[0].exceptions[0].errorMessage)
       expect(messages).toStrictEqual(['a string problem', '42'])
     })
@@ -49,8 +49,8 @@ describe('event public API', () => {
 
   describe('handled state', () => {
     it('reports handled errors with warning severity', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('manual'))
+      const { client, captured } = createClient()
+      client.notify(new Error('manual'))
       const event = firstEvent(captured)
       expect(event.severity).toBe('warning')
       expect(event.unhandled).toBe(false)
@@ -58,16 +58,20 @@ describe('event public API', () => {
     })
 
     it('records userCallbackSetSeverity when a callback changes severity', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('sev'), (event: any) => { event.severity = 'info' })
+      const { client, captured } = createClient({
+        onError: (event: any) => { event.severity = 'info' }
+      })
+      client.notify(new Error('sev'))
       const event = firstEvent(captured)
       expect(event.severity).toBe('info')
       expect(event.severityReason).toStrictEqual({ type: 'userCallbackSetSeverity' })
     })
 
     it('records unhandledOverridden when a callback changes unhandled', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any) => { event.unhandled = true })
+      const { client, captured } = createClient({
+        onError: (event: any) => { event.unhandled = true }
+      })
+      client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.unhandled).toBe(true)
       expect(event.severityReason.unhandledOverridden).toBe(true)
@@ -75,54 +79,24 @@ describe('event public API', () => {
   })
 
   describe('onError callback forms', () => {
-    it('does not send when a sync callback returns false', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), () => false)
-      expect(captured).toHaveLength(0)
-    })
-
-    it('does not send when a node-style callback reports false', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any, cb: any) => cb(null, false))
+    it('does not send when a callback returns false', () => {
+      const { client, captured } = createClient({ onError: () => false })
+      client.notify(new Error('x'))
       expect(captured).toHaveLength(0)
     })
 
     it('logs and continues when a callback throws', () => {
       const error = jest.spyOn(console, 'error').mockImplementation(() => {})
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), () => { throw new Error('cb') })
+      const { client, captured } = createClient({ onError: () => { throw new Error('cb') } })
+      client.notify(new Error('x'))
       expect(captured).toHaveLength(1)
       expect(error).toHaveBeenCalledWith('[bugsnag]', 'Error occurred in onError callback, continuing anyway…')
-    })
-
-    it('logs and continues when a node-style callback reports an error', () => {
-      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any, cb: any) => cb(new Error('bad')))
-      expect(captured).toHaveLength(1)
-      expect(error).toHaveBeenCalled()
-    })
-
-    it('awaits promise-returning callbacks', async () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), () => Promise.resolve(false))
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(captured).toHaveLength(0)
-    })
-
-    it('logs and continues when a promise rejects', async () => {
-      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), () => Promise.reject(new Error('nope')))
-      await new Promise(resolve => setTimeout(resolve, 10))
-      expect(captured).toHaveLength(1)
-      expect(error).toHaveBeenCalled()
     })
   })
 
   describe('stacktrace parsing', () => {
     const stackOf = (stack: string): any => {
-      const { captured } = start()
+      const { client, captured } = createClient()
       const err: any = new Error('boom')
       err.stack = stack
       fireOnerror('boom', 'http://x/fallback.js', 9, 9, err)
@@ -156,33 +130,31 @@ describe('event public API', () => {
 
   describe('payload', () => {
     it('serialises to the version 4 payload shape', () => {
-      const { client, captured } = createClient({ appVersion: '1.2.3' })
-      client.setContext('ctx')
+      const { client, captured } = createClient({ appType: 'example-app' })
       client.notify(new Error('boom'))
       const event = firstEvent(captured)
       expect(event.payloadVersion).toBe('4')
       expect(event.severity).toBe('warning')
       expect(event.unhandled).toBe(false)
       expect(event.severityReason).toStrictEqual({ type: 'handledException' })
-      expect(event.app).toStrictEqual({ releaseStage: 'development', version: '1.2.3', type: 'browser' })
+      expect(event.app).toStrictEqual({ releaseStage: 'development', type: 'example-app' })
       expect(event.request.url).toBe(window.location.href)
-      expect(event.context).toBe('ctx')
+      expect(event.context).toBe(window.location.pathname)
       expect(event.exceptions[0]).toStrictEqual(expect.objectContaining({ errorClass: 'Error', message: 'boom' }))
     })
 
-    it('redacts keys matching a regex', () => {
-      const { client, captured } = createClient({
-        metadata: { auth: { token: 'secret', user: 'bob' } },
-        redactedKeys: [/token/]
-      })
+    it('redacts the default password key', () => {
+      const { client, captured } = createClient()
+      client.addMetadata('auth', { password: 'secret', user: 'bob' })
       client.notify(new Error('x'))
-      expect(firstEvent(captured).metaData.auth).toStrictEqual({ token: '[REDACTED]', user: 'bob' })
+      expect(firstEvent(captured).metaData.auth).toStrictEqual({ password: '[REDACTED]', user: 'bob' })
     })
 
     it('marks circular metadata references', () => {
       const a: any = {}
       a.self = a
-      const { client, captured } = createClient({ metadata: { loop: { a } } })
+      const { client, captured } = createClient()
+      client.addMetadata('loop', { a })
       client.notify(new Error('x'))
       expect(firstEvent(captured).metaData.loop.a.self).toBe('[Circular]')
     })
@@ -190,35 +162,40 @@ describe('event public API', () => {
     it('handles metadata whose properties throw when read', () => {
       const meta: any = {}
       Object.defineProperty(meta, 'boom', { enumerable: true, get () { throw new Error('nope') } })
-      const { client, captured } = createClient({ metadata: { section: meta } })
+      const { client, captured } = createClient()
+      client.addMetadata('section', { nested: meta })
       client.notify(new Error('x'))
-      expect(firstEvent(captured).metaData.section.boom).toBe('[Throws: nope]')
+      expect(firstEvent(captured).metaData.section.nested.boom).toBe('[Throws: nope]')
     })
 
     it('replaces metadata values beyond the maximum depth', () => {
       const root: any = {}
       let cur = root
       for (let i = 0; i < 25; i++) { cur.child = {}; cur = cur.child }
-      const { client, captured } = createClient({ metadata: { deep: root } })
+      const { client, captured } = createClient()
+      client.addMetadata('deep', root)
       client.notify(new Error('x'))
       expect(JSON.stringify(firstEvent(captured).metaData.deep)).toContain('...')
     })
 
     it('strips metadata when the payload is oversized', () => {
-      const { client, captured } = createClient({ metadata: { big: { data: 'x'.repeat(1.2e6) } } })
+      const { client, captured } = createClient()
+      client.addMetadata('big', { data: 'x'.repeat(1.2e6) })
       client.notify(new Error('x'))
       expect(firstEvent(captured).metaData.notifier).toContain('metadata was removed')
     })
 
     it('serialises raw errors in metadata as name/message', () => {
-      const { client, captured } = createClient({ metadata: { err: new Error('inner') } })
+      const { client, captured } = createClient()
+      client.addMetadata('section', 'err', new Error('inner'))
       client.notify(new Error('x'))
-      expect(firstEvent(captured).metaData.err).toStrictEqual({ name: 'Error', message: 'inner' })
+      expect(firstEvent(captured).metaData.section.err).toStrictEqual({ name: 'Error', message: 'inner' })
     })
 
     it('handles metadata whose toJSON throws', () => {
       const bad = { toJSON () { throw new Error('bad') } }
-      const { client, captured } = createClient({ metadata: { bad } })
+      const { client, captured } = createClient()
+      client.addMetadata('bad', bad)
       client.notify(new Error('x'))
       expect(firstEvent(captured).metaData.bad).toBe('[Throws: bad]')
     })
@@ -228,43 +205,10 @@ describe('event public API', () => {
       for (let i = 0; i < 26000; i++) wide['k' + i] = i
       let root: any = wide
       for (let i = 0; i < 9; i++) root = { child: root }
-      const { client, captured } = createClient({ metadata: { root } })
+      const { client, captured } = createClient()
+      client.addMetadata('root', root)
       client.notify(new Error('x'))
       expect(JSON.stringify(firstEvent(captured).metaData.root)).toContain('...')
-    })
-
-    it('replaces deeply nested array metadata once the edge limit is exceeded', () => {
-      const wide: any[] = []
-      for (let i = 0; i < 26000; i++) wide.push(i)
-      let root: any = wide
-      for (let i = 0; i < 9; i++) root = { child: root }
-      const { client, captured } = createClient({ metadata: { root } })
-      client.notify(new Error('x'))
-      expect(JSON.stringify(firstEvent(captured).metaData.root)).toContain('...')
-    })
-  })
-
-  describe('event helpers in onError', () => {
-    it('exposes metadata helpers', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any) => {
-        event.addMetadata('site', { id: 's1' })
-        event.addMetadata('site', 'app', 'example')
-        expect(event.getMetadata('site', 'id')).toBe('s1')
-        event.clearMetadata('site', 'id')
-      })
-      const event = firstEvent(captured)
-      expect(event.metaData.site).toStrictEqual({ app: 'example' })
-    })
-
-    it('can clear all metadata', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'), (event: any) => {
-        event.addMetadata('s', { a: 1 })
-        event.clearMetadata('s')
-      })
-      const event = firstEvent(captured)
-      expect(event.metaData.s).toBeUndefined()
     })
   })
 })

@@ -1,13 +1,17 @@
-import { Client, Config, BugsnagStatic } from '@bugsnag/core'
+import { Client, Config } from '@bugsnag/core'
 
-interface BrowserConfig extends Omit<Config, 'onSession' | 'autoTrackSessions' | 'plugins' | 'endpoints' | 'featureFlags' | 'user' | 'onBreadcrumb' | 'maxBreadcrumbs' | 'enabledBreadcrumbTypes' | 'sendPayloadChecksums'> {
-  maxEvents?: number
-  endpoints?: { notify: string }
+export interface BrowserConfig {
+  apiKey: string
+  appType?: string
+  enabledReleaseStages?: string[] | null
+  releaseStage?: string
+  onError?: Config['onError']
 }
 
-export interface BrowserBugsnagStatic extends Omit<BugsnagStatic, 'startSession' | 'pauseSession' | 'resumeSession' | 'addOnSession' | 'removeOnSession' | 'getPlugin' | 'addFeatureFlag' | 'addFeatureFlags' | 'clearFeatureFlag' | 'clearFeatureFlags' | 'getUser' | 'setUser' | 'leaveBreadcrumb' | 'addOnBreadcrumb' | 'removeOnBreadcrumb' | 'getGroupingDiscriminator' | 'setGroupingDiscriminator'> {
-  start(apiKeyOrOpts: string | BrowserConfig): Client
-  createClient(apiKeyOrOpts: string | BrowserConfig): Client
+export interface BrowserClient extends Omit<Client, 'startSession' | 'pauseSession' | 'resumeSession' | 'addOnSession' | 'removeOnSession' | 'getPlugin' | 'getUser' | 'setUser' | 'addFeatureFlag' | 'addFeatureFlags' | 'clearFeatureFlag' | 'clearFeatureFlags' | 'leaveBreadcrumb' | 'addOnBreadcrumb' | 'removeOnBreadcrumb' | 'getGroupingDiscriminator' | 'setGroupingDiscriminator' | 'getMetadata' | 'clearMetadata' | 'getContext' | 'setContext' | 'removeOnError' | 'resetEventCount'> {}
+
+export interface BrowserBugsnagStatic {
+  createClient(apiKeyOrOpts: string | BrowserConfig): BrowserClient
 }
 
 declare const Bugsnag: BrowserBugsnagStatic

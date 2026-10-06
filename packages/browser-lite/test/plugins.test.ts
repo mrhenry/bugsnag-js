@@ -1,4 +1,4 @@
-import { createClient, fireOnerror, firstEvent, start } from './helpers'
+import { createClient, fireOnerror, firstEvent } from './helpers'
 
 const realConsole = {
   log: console.log,
@@ -8,10 +8,9 @@ const realConsole = {
   error: console.error
 }
 
-function fireRejection (reason: any, detail?: any) {
+function fireRejection (reason: any) {
   const evt: any = new window.Event('unhandledrejection')
   evt.reason = reason
-  if (detail !== undefined) evt.detail = detail
   window.dispatchEvent(evt)
 }
 
@@ -41,7 +40,7 @@ describe('automatic capture public API', () => {
 
   describe('window.onerror', () => {
     it('captures a modern uncaught exception', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('boom', 'http://example.com/app.js', 12, 34, new Error('boom'))
       const event = firstEvent(captured)
       expect(event.severity).toBe('error')
@@ -54,7 +53,7 @@ describe('automatic capture public API', () => {
     it('chains a previously installed window.onerror handler', () => {
       const previous = jest.fn()
       ;(window as any).onerror = previous
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('boom', 'http://example.com/app.js', 1, 1, new Error('boom'))
       expect(previous).toHaveBeenCalled()
       expect(captured).toHaveLength(1)
@@ -62,63 +61,36 @@ describe('automatic capture public API', () => {
 
     it('tolerates a previous handler that throws', () => {
       ;(window as any).onerror = () => { throw new Error('prev') }
-      start()
+      createClient()
       expect(() => fireOnerror('boom', 'http://x/a.js', 1, 1, new Error('boom'))).not.toThrow()
     })
 
     it('ignores cross-domain "Script error." events', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('Script error.', '', 0, 0, undefined)
       expect(captured).toHaveLength(0)
       expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('Ignoring cross-domain or eval script error'))
     })
 
     it('captures legacy events with no error object', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('legacy msg', 'http://x/a.js', 3, 4)
       expect(firstEvent(captured).exceptions[0].errorMessage).toBe('legacy msg')
     })
 
     it('decorates a frame column from the charNo argument', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       const err: any = new Error('boom')
       err.stack = 'Error: boom\n    at foo (http://x/a.js:3:0)'
       fireOnerror('boom', 'http://x/a.js', 3, 5, err)
       expect(firstEvent(captured).exceptions[0].stacktrace[0].columnNumber).toBe(5)
     })
-
-    it('decorates a frame using window.event.errorCharacter', () => {
-      const { captured } = start()
-      const err: any = new Error('boom')
-      err.stack = 'Error: boom\n    at foo (http://x/a.js:3:0)'
-      ;(window as any).event = { errorCharacter: 7 }
-      try {
-        fireOnerror('boom', 'http://x/a.js', 3, undefined, err)
-      } finally {
-        delete (window as any).event
-      }
-      expect(firstEvent(captured).exceptions[0].stacktrace[0].columnNumber).toBe(7)
-    })
-
-    it('does nothing when autoDetectErrors is false', () => {
-      const { captured } = start({ autoDetectErrors: false })
-      expect(typeof (window as any).onerror).not.toBe('function')
-      fireRejection(new Error('rejected'))
-      expect(captured).toHaveLength(0)
-    })
-
-    it('honours enabledErrorTypes.unhandledExceptions', () => {
-      const { captured } = start({ enabledErrorTypes: { unhandledExceptions: false } })
-      expect(typeof (window as any).onerror).not.toBe('function')
-      fireRejection(new Error('rejected'))
-      expect(captured).toHaveLength(1)
-    })
   })
 
   describe('unhandledrejection', () => {
     it('captures unhandled promise rejections', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireRejection(new Error('rejected'))
       const event = firstEvent(captured)
       expect(event.severity).toBe('error')
@@ -127,14 +99,8 @@ describe('automatic capture public API', () => {
       expect(event.exceptions[0].errorMessage).toBe('rejected')
     })
 
-    it('reports unhandled rejections as handled when configured', () => {
-      const { captured } = start({ reportUnhandledPromiseRejectionsAsHandled: true })
-      fireRejection(new Error('rejected'))
-      expect(firstEvent(captured).unhandled).toBe(false)
-    })
-
     it('adds metadata for a non-error reason without a stack', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       const err: any = new Error('no stack')
       delete err.stack
       fireRejection(err)
@@ -142,44 +108,31 @@ describe('automatic capture public API', () => {
     })
 
     it('coerces a non-error rejection reason to an error', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireRejection('a string reason')
       const exception = firstEvent(captured).exceptions[0]
       expect(exception.errorClass).toBe('Error')
       expect(exception.errorMessage).toBe('a string reason')
     })
-
-    it('does nothing when enabledErrorTypes.unhandledRejections is false', () => {
-      const { captured } = start({ enabledErrorTypes: { unhandledRejections: false } })
-      fireRejection(new Error('rejected'))
-      expect(captured).toHaveLength(0)
-    })
   })
 
   describe('context and request', () => {
     it('sets context to the current pathname', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(firstEvent(captured).context).toBe(window.location.pathname)
     })
 
     it('sets request.url to the current href', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(firstEvent(captured).request.url).toBe(window.location.href)
-    })
-
-    it('allows context to be overridden', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.setContext('custom-context')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).context).toBe('custom-context')
     })
 
     it('keeps query strings on request.url', () => {
       window.history.pushState({}, '', '/page?token=secret#frag')
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.context).toBe('/page')
       expect(event.request.url).toContain('?token=secret')
@@ -188,8 +141,8 @@ describe('automatic capture public API', () => {
 
   describe('device', () => {
     it('reports user agent, locale, orientation and window size', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const device = firstEvent(captured).device
       expect(device.userAgent).toBe(window.navigator.userAgent)
       expect(device.locale).toBe(window.navigator.language)
@@ -202,8 +155,8 @@ describe('automatic capture public API', () => {
     it('prefers screen.orientation when available', () => {
       Object.defineProperty(window.screen, 'orientation', { value: { type: 'landscape-primary' }, configurable: true })
       try {
-        const { Bugsnag, captured } = start()
-        Bugsnag.notify(new Error('x'))
+        const { client, captured } = createClient()
+        client.notify(new Error('x'))
         expect(firstEvent(captured).device.orientation).toBe('landscape-primary')
       } finally {
         delete (window.screen as any).orientation
@@ -211,16 +164,7 @@ describe('automatic capture public API', () => {
     })
 
     it('does not generate or persist an anonymous id', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
-      const event = firstEvent(captured)
-      expect(event.device.id).toBeUndefined()
-      expect(event.user).toBeUndefined()
-      expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
-    })
-
-    it('accepts and ignores legacy privacy options', () => {
-      const { client, captured } = createClient({ generateAnonymousId: true, collectUserIp: false } as any)
+      const { client, captured } = createClient()
       client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()

@@ -38,15 +38,7 @@ export function getBugsnag (): any {
   return require('../src/bugsnag')
 }
 
-// Starts the singleton, capturing requests, as an application would.
-export function start (opts: any = {}): { Bugsnag: any, captured: Captured[] } {
-  const captured = mockDelivery()
-  const Bugsnag = getBugsnag()
-  Bugsnag.start({ apiKey: API_KEY, ...opts })
-  return { Bugsnag, captured }
-}
-
-// Creates a client without touching the singleton, as an embedding app would.
+// Creates a client, capturing requests. There is no `start()` singleton.
 export function createClient (opts: any = {}): { Bugsnag: any, client: any, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()

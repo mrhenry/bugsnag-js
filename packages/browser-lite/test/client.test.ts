@@ -1,4 +1,4 @@
-import { API_KEY, createClient, firstEvent, getBugsnag, mockDelivery } from './helpers'
+import { API_KEY, createClient, firstEvent, getBugsnag } from './helpers'
 
 const realConsole = {
   log: console.log,
@@ -22,24 +22,12 @@ describe('client public API', () => {
   })
 
   describe('metadata', () => {
-    it('adds, gets and clears metadata', () => {
-      const { client } = createClient()
+    it('adds metadata to reports', () => {
+      const { client, captured } = createClient()
       client.addMetadata('account', { id: 1 })
       client.addMetadata('account', 'name', 'a')
-      expect(client.getMetadata('account')).toStrictEqual({ id: 1, name: 'a' })
-      expect(client.getMetadata('account', 'id')).toBe(1)
-      client.clearMetadata('account', 'id')
-      expect(client.getMetadata('account')).toStrictEqual({ name: 'a' })
-      client.clearMetadata('account')
-      expect(client.getMetadata('account')).toBeUndefined()
-      expect(client.getMetadata('missing', 'key')).toBeUndefined()
-    })
-
-    it('attaches client metadata to reports', () => {
-      const { client, captured } = createClient()
-      client.addMetadata('checkout', { cartId: 'c-1' })
       client.notify(new Error('x'))
-      expect(firstEvent(captured).metaData.checkout).toStrictEqual({ cartId: 'c-1' })
+      expect(firstEvent(captured).metaData.account).toStrictEqual({ id: 1, name: 'a' })
     })
 
     it('refuses prototype-polluting section names', () => {
@@ -48,66 +36,80 @@ describe('client public API', () => {
       client.addMetadata('constructor', { polluted: true })
       client.addMetadata('prototype', { polluted: true })
       expect(({} as any).polluted).toBeUndefined()
-      expect(client.getMetadata('missing')).toBeUndefined()
     })
   })
 
   describe('context', () => {
-    it('gets and sets context', () => {
-      const { client } = createClient()
-      expect(client.getContext()).toBeUndefined()
-      client.setContext('ctx')
-      expect(client.getContext()).toBe('ctx')
+    it('defaults context to the current pathname', () => {
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
+      expect(firstEvent(captured).context).toBe(window.location.pathname)
+    })
+
+    it('allows context to be overridden in onError', () => {
+      const { client, captured } = createClient({
+        onError: (event: any) => { event.context = 'custom-context' }
+      })
+      client.notify(new Error('x'))
+      expect(firstEvent(captured).context).toBe('custom-context')
     })
   })
 
   describe('callbacks', () => {
-    it('adds and removes error callbacks', () => {
-      const { client } = createClient()
+    it('runs configured and added onError callbacks', () => {
+      const { client, captured } = createClient()
       const cb = jest.fn()
       client.addOnError(cb)
-      client.removeOnError(cb)
       client.notify(new Error('x'))
-      expect(cb).not.toHaveBeenCalled()
+      expect(cb).toHaveBeenCalled()
+      expect(firstEvent(captured).exceptions[0].errorMessage).toBe('x')
+    })
+
+    it('does not send when a callback returns false', () => {
+      const { client, captured } = createClient({ onError: () => false })
+      client.notify(new Error('x'))
+      expect(captured).toHaveLength(0)
+    })
+
+    it('logs and continues when a callback throws', () => {
+      const error = jest.spyOn(console, 'error').mockImplementation(() => {})
+      const { client, captured } = createClient({ onError: () => { throw new Error('cb') } })
+      client.notify(new Error('x'))
+      expect(captured).toHaveLength(1)
+      expect(error).toHaveBeenCalledWith('[bugsnag]', 'Error occurred in onError callback, continuing anyway…')
     })
   })
 
   describe('configuration', () => {
     it('warns about invalid options and falls back to defaults', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const { client, captured } = createClient({ maxEvents: 101, appVersion: 123 } as any)
+      const { client, captured } = createClient({ appType: 123 } as any)
       expect(warn).toHaveBeenCalledTimes(1)
       expect(warn.mock.calls[0][0]).toBe('[bugsnag]')
       expect(warn.mock.calls[0][1].message).toContain('Invalid configuration')
       client.notify(new Error('x'))
-      expect(firstEvent(captured).app.version).toBeUndefined()
+      expect(firstEvent(captured).app.type).toBe('browser')
     })
 
     it('stringifies unusual config values in the warning', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      createClient({ appVersion: function () {} } as any)
+      getBugsnag().createClient({ apiKey: API_KEY, appType: function () {} })
       expect(warn).toHaveBeenCalledTimes(1)
       const message = warn.mock.calls[0][1].message
-      expect(message).toContain('appVersion')
+      expect(message).toContain('appType')
       expect(message).toContain('got function')
     })
 
-    it('exposes the public static surface and hides the session API', () => {
-      const Bugsnag = getBugsnag()
-      expect(typeof Bugsnag.start).toBe('function')
-      expect(typeof Bugsnag.createClient).toBe('function')
-      expect(typeof Bugsnag.isStarted).toBe('function')
-      expect(Bugsnag.default).toBe(Bugsnag)
-      expect(Bugsnag.startSession).toBeUndefined()
-      expect(Bugsnag.pauseSession).toBeUndefined()
-      expect(Bugsnag.resumeSession).toBeUndefined()
+    it('does not expose the session API', () => {
+      const { client } = createClient()
+      expect((client as any).startSession).toBeUndefined()
+      expect((client as any).pauseSession).toBeUndefined()
+      expect((client as any).resumeSession).toBeUndefined()
     })
 
-    it('only ever reports to the configured notify endpoint', () => {
-      const captured = mockDelivery()
-      const Bugsnag = getBugsnag()
-      Bugsnag.start({ apiKey: API_KEY })
-      Bugsnag.notify(new Error('x'))
+    it('only ever reports to the notify endpoint', () => {
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(captured).toHaveLength(1)
       expect(captured[0].url).toBe('https://notify.bugsnag.com')
     })

@@ -16,6 +16,10 @@
   var version = '__VERSION__'
   var url = 'https://github.com/bugsnag/bugsnag-js'
 
+  var NOTIFY_ENDPOINT = 'https://notify.bugsnag.com'
+  var MAX_EVENTS = 10
+  var REDACTED_KEYS = ['password']
+
   function noop () {}
 
   /* -------------------------------------------------------------------------
@@ -196,50 +200,31 @@
   }
 
   /* -------------------------------------------------------------------------
-   * metadata / feature flags
+   * metadata
    * ---------------------------------------------------------------------- */
 
-  var metadataDelegate = {
-    add: function (state, section, keyOrObj, maybeVal) {
-      if (!section) return
+  function addMetadata (state, section, keyOrObj, maybeVal) {
+    if (!section) return
 
-      var updates
-
-      // addMetadata("section", null) -> clears section
-      if (keyOrObj === null) return metadataDelegate.clear(state, section)
-
-      if (typeof keyOrObj === 'object') updates = keyOrObj
-      if (typeof keyOrObj === 'string') {
-        updates = {}
-        updates[keyOrObj] = maybeVal
-      }
-
-      if (!updates) return
-
-      if (section === '__proto__' || section === 'constructor' || section === 'prototype') return
-
-      if (!state[section]) state[section] = {}
-
-      state[section] = assign({}, state[section], updates)
-    },
-    get: function (state, section, key) {
-      if (typeof section !== 'string') return undefined
-      if (!key) return state[section]
-      if (state[section]) return state[section][key]
-      return undefined
-    },
-    clear: function (state, section, key) {
-      if (typeof section !== 'string') return
-
-      if (!key) {
-        delete state[section]
-        return
-      }
-
-      if (section === '__proto__' || section === 'constructor' || section === 'prototype') return
-
-      if (state[section]) delete state[section][key]
+    if (keyOrObj === null) {
+      delete state[section]
+      return
     }
+
+    var updates
+    if (typeof keyOrObj === 'object') updates = keyOrObj
+    else if (typeof keyOrObj === 'string') {
+      updates = {}
+      updates[keyOrObj] = maybeVal
+    }
+
+    if (!updates) return
+
+    if (section === '__proto__' || section === 'constructor' || section === 'prototype') return
+
+    if (!state[section]) state[section] = {}
+
+    state[section] = assign({}, state[section], updates)
   }
 
   /* -------------------------------------------------------------------------
@@ -248,14 +233,6 @@
 
   function stringWithLength (value) {
     return typeof value === 'string' && !!value.length
-  }
-
-  function intRange (min, max) {
-    if (min === undefined) min = 1
-    if (max === undefined) max = Infinity
-    return function (value) {
-      return typeof value === 'number' && parseInt('' + value, 10) === value && value >= min && value <= max
-    }
   }
 
   function listOfFunctions (value) {
@@ -268,62 +245,21 @@
    * configuration schema
    * ---------------------------------------------------------------------- */
 
-  function defaultErrorTypes () {
-    return { unhandledExceptions: true, unhandledRejections: true }
-  }
-
   var configSchema = {
     apiKey: {
       defaultValue: function () { return null },
       message: 'is required',
       validate: stringWithLength
     },
-    appVersion: {
-      defaultValue: function () { return undefined },
-      message: 'should be a string',
-      validate: function (value) { return value === undefined || stringWithLength(value) }
-    },
     appType: {
       defaultValue: function () { return 'browser' },
       message: 'should be a string',
       validate: function (value) { return value === undefined || stringWithLength(value) }
     },
-    autoDetectErrors: {
-      defaultValue: function () { return true },
-      message: 'should be true|false',
-      validate: function (value) { return value === true || value === false }
-    },
-    enabledErrorTypes: {
-      defaultValue: defaultErrorTypes,
-      message: 'should be an object containing the flags { unhandledExceptions:true|false, unhandledRejections:true|false }',
-      allowPartialObject: true,
-      validate: function (value) {
-        if (typeof value !== 'object' || !value) return false
-        var providedKeys = keys(value)
-        var defaultKeys = keys(defaultErrorTypes())
-        if (filterArray(providedKeys, function (k) { return includes(defaultKeys, k) }).length < providedKeys.length) return false
-        if (filterArray(keys(value), function (k) { return typeof value[k] !== 'boolean' }).length > 0) return false
-        return true
-      }
-    },
     onError: {
       defaultValue: function () { return [] },
       message: 'should be a function or array of functions',
       validate: listOfFunctions
-    },
-    endpoints: {
-      defaultValue: function (endpoints) {
-        if (typeof endpoints === 'undefined') {
-          return { notify: 'https://notify.bugsnag.com' }
-        }
-        return { notify: null }
-      },
-      message: 'should be an object containing the endpoint URL { notify }',
-      validate: function (val) {
-        return (val && typeof val === 'object') &&
-          stringWithLength(val.notify) &&
-          filterArray(keys(val), function (k) { return !includes(['notify'], k) }).length === 0
-      }
     },
     enabledReleaseStages: {
       defaultValue: function () { return null },
@@ -339,48 +275,6 @@
       },
       message: 'should be a string',
       validate: function (value) { return typeof value === 'string' && value.length }
-    },
-    context: {
-      defaultValue: function () { return undefined },
-      message: 'should be a string',
-      validate: function (value) { return value === undefined || typeof value === 'string' }
-    },
-    metadata: {
-      defaultValue: function () { return {} },
-      message: 'should be an object',
-      validate: function (value) { return typeof value === 'object' && value !== null }
-    },
-    logger: {
-      defaultValue: function () {
-        return (typeof console !== 'undefined' && typeof console.debug === 'function')
-          ? getPrefixedConsole()
-          : undefined
-      },
-      message: 'should be null or an object with methods { debug, info, warn, error }',
-      validate: function (value) {
-        return (!value) || (value && reduceArray(['debug', 'info', 'warn', 'error'], function (accum, method) {
-          return accum && typeof value[method] === 'function'
-        }, true))
-      }
-    },
-    redactedKeys: {
-      defaultValue: function () { return ['password'] },
-      message: 'should be an array of strings|regexes',
-      validate: function (value) {
-        return isArray(value) && value.length === filterArray(value, function (s) {
-          return typeof s === 'string' || (s && typeof s.test === 'function')
-        }).length
-      }
-    },
-    reportUnhandledPromiseRejectionsAsHandled: {
-      defaultValue: function () { return false },
-      message: 'should be true|false',
-      validate: function (value) { return value === true || value === false }
-    },
-    maxEvents: {
-      defaultValue: function () { return 10 },
-      message: 'should be a positive integer <=100',
-      validate: function (val) { return intRange(1, 100)(val) }
     }
   }
 
@@ -403,10 +297,7 @@
    * ---------------------------------------------------------------------- */
 
   function hasStack (err) {
-    return !!err &&
-      (!!err.stack || !!err.stacktrace || !!err['opera#sourceloc']) &&
-      typeof (err.stack || err.stacktrace || err['opera#sourceloc']) === 'string' &&
-      err.stack !== err.name + ': ' + err.message
+    return !!err && typeof err.stack === 'string' && err.stack !== err.name + ': ' + err.message
   }
 
   function isError (o) {
@@ -453,7 +344,7 @@
   }
 
   function parseStack (error) {
-    var stack = error.stack || error.stacktrace
+    var stack = error.stack
     if (!stack || typeof stack !== 'string') return []
     var lines = stack.split('\n')
     var frames = []
@@ -462,14 +353,6 @@
       if (frame) frames.push(frame)
     }
     return frames
-  }
-
-  function generateStack () {
-    try {
-      throw new Error()
-    } catch (e) {
-      return parseStack(e)
-    }
   }
 
   function normaliseFunctionName (n) {
@@ -502,62 +385,39 @@
   }
 
   function createBugsnagError (errorClass, errorMessage, type, stacktrace) {
+    var frames = []
+    for (var i = 0; i < stacktrace.length; i++) {
+      var f = formatStackframe(stacktrace[i])
+      if (f.file !== undefined || f.method !== undefined || f.lineNumber !== undefined || f.columnNumber !== undefined) {
+        frames.push(f)
+      }
+    }
     return {
       errorClass: ensureString(errorClass),
       errorMessage: ensureString(errorMessage),
       type: type,
-      stacktrace: reduceArray(stacktrace, function (accum, frame) {
-        var f = formatStackframe(frame)
-        try {
-          if (JSON.stringify(f) === '{}') return accum
-          return accum.concat(f)
-        } catch (e) {
-          return accum
-        }
-      }, [])
+      stacktrace: frames
     }
   }
 
   function normaliseError (maybeError) {
-    var error
-    if (isError(maybeError)) {
-      error = maybeError
-    } else {
-      var message
-      try {
-        message = String(maybeError)
-      } catch (e) {
-        message = '[unserialisable]'
-      }
-      error = new Error(message)
+    if (isError(maybeError)) return maybeError
+    try {
+      return new Error(String(maybeError))
+    } catch (e) {
+      return new Error('[unserialisable]')
     }
-
-    var internalFrames = 0
-
-    if (!hasStack(error)) {
-      try {
-        throw error
-      } catch (e) {
-        if (hasStack(e)) {
-          error = e
-          internalFrames = 1
-        }
-      }
-    }
-
-    return [error, internalFrames]
   }
 
   /* -------------------------------------------------------------------------
    * Event
    * ---------------------------------------------------------------------- */
 
-  function Event (errorClass, errorMessage, stacktrace, handledState, originalError) {
+  function Event (errorClass, errorMessage, stacktrace, handledState) {
     if (stacktrace === undefined) stacktrace = []
     if (handledState === undefined) handledState = defaultHandledState()
 
     this.context = undefined
-    this.originalError = originalError
 
     this._handledState = handledState
     this.severity = this._handledState.severity
@@ -575,15 +435,7 @@
   }
 
   Event.prototype.addMetadata = function (section, keyOrObj, maybeVal) {
-    return metadataDelegate.add(this._metadata, section, keyOrObj, maybeVal)
-  }
-
-  Event.prototype.getMetadata = function (section, key) {
-    return metadataDelegate.get(this._metadata, section, key)
-  }
-
-  Event.prototype.clearMetadata = function (section, key) {
-    return metadataDelegate.clear(this._metadata, section, key)
+    return addMetadata(this._metadata, section, keyOrObj, maybeVal)
   }
 
   Event.prototype.toJSON = function () {
@@ -601,88 +453,29 @@
     }
   }
 
-  Event.getStacktrace = function (error, errorFramesToSkip, backtraceFramesToSkip) {
-    if (hasStack(error)) return parseStack(error).slice(errorFramesToSkip)
-    return generateStack().slice(1 + backtraceFramesToSkip)
-  }
-
-  Event.create = function (maybeError, handledState, errorFramesToSkip) {
-    if (errorFramesToSkip === undefined) errorFramesToSkip = 0
-
-    var normalised = normaliseError(maybeError)
-    var error = normalised[0]
-    var internalFrames = normalised[1]
-
-    var event
-    try {
-      var stacktrace = Event.getStacktrace(
-        error,
-        internalFrames > 0 ? 1 + internalFrames + errorFramesToSkip : 0,
-        1 + errorFramesToSkip
-      )
-      event = new Event(error.name, error.message, stacktrace, handledState, maybeError)
-    } catch (e) {
-      event = new Event(error.name, error.message, [], handledState, maybeError)
-    }
-
-    return event
+  Event.create = function (maybeError, handledState) {
+    var error = normaliseError(maybeError)
+    return new Event(error.name, error.message, hasStack(error) ? parseStack(error) : [], handledState)
   }
 
   Event.__type = 'browserjs'
 
   /* -------------------------------------------------------------------------
-   * callback runners
+   * callback runner
    * ---------------------------------------------------------------------- */
 
-  function asyncEvery (arr, fn, cb) {
-    var index = 0
-
-    var next = function () {
-      if (index >= arr.length) return cb(null, true)
-      fn(arr[index], function (err, result) {
-        if (err) return cb(err)
-        if (result === false) return cb(null, false)
-        index++
-        next()
-      })
-    }
-
-    next()
-  }
-
-  function runCallbacks (callbacks, event, onCallbackError, cb) {
-    var runMaybeAsyncCallback = function (fn, cb) {
-      if (typeof fn !== 'function') return cb(null)
+  function runCallbacks (callbacks, event, logger) {
+    for (var i = 0; i < callbacks.length; i++) {
+      var fn = callbacks[i]
+      if (typeof fn !== 'function') continue
       try {
-        if (fn.length !== 2) {
-          var ret = fn(event)
-          if (ret && typeof ret.then === 'function') {
-            return ret.then(
-              function (val) { setTimeout(function () { cb(null, val) }) },
-              function (err) {
-                setTimeout(function () {
-                  onCallbackError(err)
-                  return cb(null, true)
-                })
-              }
-            )
-          }
-          return cb(null, ret)
-        }
-        fn(event, function (err, result) {
-          if (err) {
-            onCallbackError(err)
-            return cb(null)
-          }
-          cb(null, result)
-        })
+        if (fn(event) === false) return false
       } catch (e) {
-        onCallbackError(e)
-        cb(null)
+        logger.error('Error occurred in onError callback, continuing anyway…')
+        logger.error(e)
       }
     }
-
-    asyncEvery(callbacks, runMaybeAsyncCallback, cb)
+    return true
   }
 
   /* -------------------------------------------------------------------------
@@ -695,10 +488,11 @@
     this._config = {}
 
     this._delivery = { sendEvent: noop }
-    this._logger = { debug: noop, info: noop, warn: noop, error: noop }
+    this._logger = typeof console !== 'undefined'
+      ? getPrefixedConsole()
+      : { debug: noop, info: noop, warn: noop, error: noop }
 
     this._metadata = {}
-    this._context = undefined
 
     this._cbs = { e: [] }
 
@@ -706,47 +500,32 @@
     this.Event = Event
 
     this._config = this._configure(configuration)
-
-    this._depth = 1
-
-    var self = this
-    var notify = this.notify
-    this.notify = function () {
-      return notify.apply(self, arguments)
-    }
   }
 
   Client.prototype._configure = function (opts) {
-    var accum = reduceArray(keys(configSchema), function (accum, key) {
-      var defaultValue = configSchema[key].defaultValue(opts[key])
+    var config = {}
+    var errors = {}
+    var schemaKeys = keys(configSchema)
 
-      if (opts[key] !== undefined) {
-        var valid = configSchema[key].validate(opts[key])
-        if (!valid) {
-          accum.errors[key] = configSchema[key].message
-          accum.config[key] = defaultValue
-        } else {
-          if (configSchema[key].allowPartialObject) accum.config[key] = assign(defaultValue, opts[key])
-          else accum.config[key] = opts[key]
-        }
+    for (var i = 0; i < schemaKeys.length; i++) {
+      var key = schemaKeys[i]
+      var def = configSchema[key]
+      var value = opts[key]
+
+      if (value === undefined) {
+        config[key] = def.defaultValue()
+      } else if (def.validate(value)) {
+        config[key] = value
       } else {
-        accum.config[key] = defaultValue
+        errors[key] = def.message
+        config[key] = def.defaultValue()
       }
-
-      return accum
-    }, { errors: {}, config: {} })
-
-    var errors = accum.errors
-    var config = accum.config
+    }
 
     if (!config.apiKey) throw new Error('No Bugsnag API Key set')
     if (!/^[0-9a-f]{32}$/i.test(config.apiKey)) errors.apiKey = 'should be a string of 32 hexadecimal characters'
 
-    this._metadata = assign({}, config.metadata)
-    this._context = config.context
-    if (config.logger) this._logger = config.logger
-
-    if (config.onError) this._cbs.e = this._cbs.e.concat(config.onError)
+    if (config.onError) this._cbs.e = [].concat(config.onError)
 
     if (keys(errors).length) {
       this._logger.warn(generateConfigErrorMessage(errors, opts))
@@ -756,84 +535,51 @@
   }
 
   Client.prototype.addMetadata = function (section, keyOrObj, maybeVal) {
-    return metadataDelegate.add(this._metadata, section, keyOrObj, maybeVal)
-  }
-
-  Client.prototype.getMetadata = function (section, key) {
-    return metadataDelegate.get(this._metadata, section, key)
-  }
-
-  Client.prototype.clearMetadata = function (section, key) {
-    return metadataDelegate.clear(this._metadata, section, key)
-  }
-
-  Client.prototype.getContext = function () { return this._context }
-  Client.prototype.setContext = function (c) { this._context = c }
-
-  Client.prototype._setDelivery = function (d) {
-    this._delivery = d(this)
+    return addMetadata(this._metadata, section, keyOrObj, maybeVal)
   }
 
   Client.prototype.addOnError = function (fn, front) {
     this._cbs.e[front ? 'unshift' : 'push'](fn)
   }
 
-  Client.prototype.removeOnError = function (fn) {
-    this._cbs.e = filterArray(this._cbs.e, function (f) { return f !== fn })
+  Client.prototype.notify = function (maybeError) {
+    this._notify(Event.create(maybeError, undefined))
   }
 
-  Client.prototype.notify = function (maybeError, onError, postReportCallback) {
-    if (postReportCallback === undefined) postReportCallback = noop
-    var event = Event.create(maybeError, undefined, this._depth + 1)
-    this._notify(event, onError, postReportCallback)
-  }
-
-  Client.prototype._notify = function (event, onError, postReportCallback) {
-    if (postReportCallback === undefined) postReportCallback = noop
-
+  Client.prototype._notify = function (event) {
     var self = this
 
     event.app = assign({}, event.app, {
       releaseStage: this._config.releaseStage,
-      version: this._config.appVersion,
       type: this._config.appType
     })
-    event.context = event.context || this._context
     event._metadata = assign({}, event._metadata, this._metadata)
 
     if (this._config.enabledReleaseStages !== null && !includes(this._config.enabledReleaseStages, this._config.releaseStage)) {
       this._logger.warn('Event not sent due to releaseStage/enabledReleaseStages configuration')
-      return postReportCallback(null, event)
+      return
     }
 
     var originalSeverity = event.severity
 
-    var onCallbackError = function (err) {
-      self._logger.error('Error occurred in onError callback, continuing anyway…')
-      self._logger.error(err)
+    if (!runCallbacks(this._cbs.e, event, this._logger)) {
+      this._logger.debug('Event not sent due to onError callback')
+      return
     }
 
-    var callbacks = [].concat(this._cbs.e).concat(onError)
-    runCallbacks(callbacks, event, onCallbackError, function (callbackErr, shouldSend) {
-      if (!shouldSend) {
-        self._logger.debug('Event not sent due to onError callback')
-        return postReportCallback(null, event)
-      }
+    if (originalSeverity !== event.severity) {
+      event._handledState.severityReason = { type: 'userCallbackSetSeverity' }
+    }
 
-      if (originalSeverity !== event.severity) {
-        event._handledState.severityReason = { type: 'userCallbackSetSeverity' }
-      }
+    if (event.unhandled !== event._handledState.unhandled) {
+      event._handledState.severityReason.unhandledOverridden = true
+      event._handledState.unhandled = event.unhandled
+    }
 
-      if (event.unhandled !== event._handledState.unhandled) {
-        event._handledState.severityReason.unhandledOverridden = true
-        event._handledState.unhandled = event.unhandled
-      }
-
-      self._delivery.sendEvent({
-        apiKey: self._config.apiKey,
-        notifier: self._notifier,
-        events: [event]
-      }, function (err) { postReportCallback(err, event) })
+    self._delivery.sendEvent({
+      apiKey: self._config.apiKey,
+      notifier: self._notifier,
+      events: [event]
     })
   }
 
@@ -908,14 +654,12 @@
     var n = 0
 
     client.addOnError(function () {
-      if (n >= client._config.maxEvents) {
-        client._logger.warn('Cancelling event send due to maxEvents limit of ' + client._config.maxEvents + ' being reached')
+      if (n >= MAX_EVENTS) {
+        client._logger.warn('Cancelling event send due to maxEvents limit of ' + MAX_EVENTS + ' being reached')
         return false
       }
       n++
     })
-
-    client.resetEventCount = function () { n = 0 }
   }
 
   function stripQueryString (str) {
@@ -942,20 +686,11 @@
     var culprit = stack[0]
     if (!culprit.file && typeof url === 'string') culprit.file = url
     if (!culprit.lineNumber && isActualNumber(lineNo)) culprit.lineNumber = lineNo
-    if (!culprit.columnNumber) {
-      if (isActualNumber(charNo)) {
-        culprit.columnNumber = charNo
-      } else if (window.event && isActualNumber(window.event.errorCharacter)) {
-        culprit.columnNumber = window.event.errorCharacter
-      }
-    }
+    if (!culprit.columnNumber && isActualNumber(charNo)) culprit.columnNumber = charNo
   }
 
   function setupWindowOnerror (client, win) {
     if (win === undefined) win = window
-
-    if (!client._config.autoDetectErrors) return
-    if (!client._config.enabledErrorTypes.unhandledExceptions) return
 
     var prevOnError = win.onerror
 
@@ -963,8 +698,11 @@
       if (lineNo === 0 && /Script error\.?/.test(message)) {
         client._logger.warn('Ignoring cross-domain or eval script error. See docs: https://tinyurl.com/yy3rn63z')
       } else {
-        var handledState = { severity: 'error', unhandled: true, severityReason: { type: 'unhandledException' } }
-        var event = client.Event.create(error || message, handledState, 1)
+        var event = client.Event.create(error || message, {
+          severity: 'error',
+          unhandled: true,
+          severityReason: { type: 'unhandledException' }
+        })
         decorateStack(event.errors[0].stacktrace, url, lineNo, charNo)
         client._notify(event)
       }
@@ -978,29 +716,26 @@
   function setupUnhandledRejection (client, win) {
     if (win === undefined) win = window
 
-    if (!client._config.autoDetectErrors || !client._config.enabledErrorTypes.unhandledRejections) return
-
     var listener = function (evt) {
       var error = evt.reason
-      var unhandled = !client._config.reportUnhandledPromiseRejectionsAsHandled
 
       var event = client.Event.create(error, {
         severity: 'error',
-        unhandled: unhandled,
+        unhandled: true,
         severityReason: { type: 'unhandledPromiseRejection' }
-      }, 1)
-
-      client._notify(event, function (event) {
-        if (isError(error) && !error.stack) {
-          var section = {}
-          section[Object.prototype.toString.call(error)] = {
-            name: error.name,
-            message: error.message,
-            code: error.code
-          }
-          event.addMetadata('unhandledRejection handler', section)
-        }
       })
+
+      if (isError(error) && !error.stack) {
+        var section = {}
+        section[Object.prototype.toString.call(error)] = {
+          name: error.name,
+          message: error.message,
+          code: error.code
+        }
+        event.addMetadata('unhandledRejection handler', section)
+      }
+
+      client._notify(event)
     }
 
     win.addEventListener('unhandledrejection', listener)
@@ -1015,13 +750,13 @@
     'events.[].request'
   ]
 
-  function jsonPayloadEvent (event, redactedKeys) {
-    var payload = safeJsonStringify(event, null, null, { redactedPaths: EVENT_REDACTION_PATHS, redactedKeys: redactedKeys })
+  function jsonPayloadEvent (event) {
+    var payload = safeJsonStringify(event, null, null, { redactedPaths: EVENT_REDACTION_PATHS, redactedKeys: REDACTED_KEYS })
     if (payload.length > 1000000) {
       event.events[0]._metadata = {
         notifier: 'WARNING!\nSerialized payload was ' + (payload.length / 1000000) + 'MB (limit = 1MB)\nmetadata was removed'
       }
-      payload = safeJsonStringify(event, null, null, { redactedPaths: EVENT_REDACTION_PATHS, redactedKeys: redactedKeys })
+      payload = safeJsonStringify(event, null, null, { redactedPaths: EVENT_REDACTION_PATHS, redactedKeys: REDACTED_KEYS })
     }
     return payload
   }
@@ -1030,35 +765,21 @@
     if (win === undefined) win = window
 
     return {
-      sendEvent: function (event, cb) {
-        if (cb === undefined) cb = function () {}
-
+      sendEvent: function (event) {
         try {
-          var url = client._config.endpoints.notify
-          if (url === null) {
-            return cb(new Error('Event not sent due to incomplete endpoint configuration'))
-          }
-
           var req = new win.XMLHttpRequest()
-          var body = jsonPayloadEvent(event, client._config.redactedKeys)
+          var body = jsonPayloadEvent(event)
 
           req.onreadystatechange = function () {
             if (req.readyState === win.XMLHttpRequest.DONE) {
               var status = req.status
               if (status === 0 || status >= 400) {
-                var err = new Error('Request failed with status ' + status)
-                client._logger.error('Event failed to send…', err)
-                if (body.length > 1000000) {
-                  client._logger.warn('Event oversized (' + (body.length / 1000000).toFixed(2) + ' MB)')
-                }
-                cb(err)
-              } else {
-                cb(null)
+                client._logger.error('Event failed to send…', new Error('Request failed with status ' + status))
               }
             }
           }
 
-          req.open('POST', url)
+          req.open('POST', NOTIFY_ENDPOINT)
           req.setRequestHeader('Content-Type', 'application/json')
           req.setRequestHeader('Bugsnag-Api-Key', event.apiKey)
           req.setRequestHeader('Bugsnag-Payload-Version', '4')
@@ -1077,7 +798,6 @@
    * ---------------------------------------------------------------------- */
 
   var Bugsnag = {
-    _client: null,
     createClient: function (opts) {
       if (typeof opts === 'string') opts = { apiKey: opts }
       if (!opts) opts = {}
@@ -1092,37 +812,12 @@
       setupWindowOnerror(bugsnag)
       setupUnhandledRejection(bugsnag)
 
-      bugsnag._setDelivery(xmlHttpRequestDelivery)
+      bugsnag._delivery = xmlHttpRequestDelivery(bugsnag)
 
       bugsnag._logger.debug('Loaded!')
 
       return bugsnag
-    },
-    start: function (opts) {
-      if (Bugsnag._client) {
-        Bugsnag._client._logger.warn('Bugsnag.start() was called more than once. Ignoring.')
-        return Bugsnag._client
-      }
-      Bugsnag._client = Bugsnag.createClient(opts)
-      return Bugsnag._client
-    },
-    isStarted: function () {
-      return Bugsnag._client != null
     }
-  }
-
-  var staticMethods = ['resetEventCount'].concat(keys(Client.prototype))
-  for (var si = 0; si < staticMethods.length; si++) {
-    (function (m) {
-      if (/^_/.test(m)) return
-      Bugsnag[m] = function () {
-        if (!Bugsnag._client) return console.log('Bugsnag.' + m + '() was called before Bugsnag.start()')
-        Bugsnag._client._depth += 1
-        var ret = Bugsnag._client[m].apply(Bugsnag._client, arguments)
-        Bugsnag._client._depth -= 1
-        return ret
-      }
-    })(staticMethods[si])
   }
 
   module.exports = Bugsnag

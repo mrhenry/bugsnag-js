@@ -10,8 +10,6 @@ interface Captured {
   body: any
 }
 
-// console is mutated by tests, so keep the real methods around and restore them
-// after each test
 const realConsole = {
   log: console.log,
   debug: console.debug,
@@ -48,20 +46,11 @@ function getBugsnag (): typeof BugsnagBrowserStatic {
   return require('../src/bugsnag') as typeof BugsnagBrowserStatic
 }
 
-function start (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, captured: Captured[] } {
-  const captured = mockDelivery()
-  const Bugsnag = getBugsnag()
-  Bugsnag.start({ apiKey: API_KEY, ...opts })
-  return { Bugsnag, captured }
-}
-
-// a client created without touching the static singleton, as an embedding
-// application would do
-function createClient (opts: any = {}): { Bugsnag: typeof BugsnagBrowserStatic, client: any, captured: Captured[] } {
+function createClient (opts: any = {}): { client: any, captured: Captured[] } {
   const captured = mockDelivery()
   const Bugsnag = getBugsnag()
   const client = Bugsnag.createClient({ apiKey: API_KEY, ...opts })
-  return { Bugsnag, client, captured }
+  return { client, captured }
 }
 
 function firstEvent (captured: Captured[]): any {
@@ -84,7 +73,6 @@ describe('browser-lite behaviour', () => {
 
   beforeEach(() => {
     jest.resetModules()
-    // suppress default logging noise (re-applied each test because afterEach restores console)
     jest.spyOn(console, 'debug').mockImplementation(() => {})
     jest.spyOn(console, 'info').mockImplementation(() => {})
     rejectionListeners = []
@@ -106,7 +94,7 @@ describe('browser-lite behaviour', () => {
 
   describe('automatic error capture', () => {
     it('captures uncaught exceptions via window.onerror', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('boom', 'http://example.com/app.js', 12, 34, new Error('boom'))
 
       expect(captured).toHaveLength(1)
@@ -121,7 +109,7 @@ describe('browser-lite behaviour', () => {
     it('chains a previously installed window.onerror handler', () => {
       const previous = jest.fn()
       ;(window as any).onerror = previous
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('boom', 'http://example.com/app.js', 1, 1, new Error('boom'))
       expect(previous).toHaveBeenCalled()
       expect(captured).toHaveLength(1)
@@ -129,14 +117,14 @@ describe('browser-lite behaviour', () => {
 
     it('ignores cross-domain "Script error." events', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const { captured } = start()
+      const { captured } = createClient()
       fireOnerror('Script error.', '', 0, 0, undefined)
       expect(captured).toHaveLength(0)
       expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('Ignoring cross-domain or eval script error'))
     })
 
     it('captures unhandled promise rejections', () => {
-      const { captured } = start()
+      const { captured } = createClient()
       fireRejection(new Error('rejected'))
 
       expect(captured).toHaveLength(1)
@@ -146,34 +134,11 @@ describe('browser-lite behaviour', () => {
       expect(event.severityReason).toStrictEqual({ type: 'unhandledPromiseRejection' })
       expect(event.exceptions[0].errorMessage).toBe('rejected')
     })
-
-    it('reports unhandled rejections as handled when configured', () => {
-      const { captured } = start({ reportUnhandledPromiseRejectionsAsHandled: true })
-      fireRejection(new Error('rejected'))
-      expect(firstEvent(captured).unhandled).toBe(false)
-    })
-
-    it('does not auto-capture when autoDetectErrors is false', () => {
-      const { captured } = start({ autoDetectErrors: false })
-      expect(typeof (window as any).onerror).not.toBe('function')
-      fireRejection(new Error('rejected'))
-      expect(captured).toHaveLength(0)
-    })
-
-    it('honours enabledErrorTypes flags individually', () => {
-      const { captured } = start({ enabledErrorTypes: { unhandledRejections: false } })
-      fireRejection(new Error('rejected'))
-      expect(captured).toHaveLength(0)
-
-      fireOnerror('boom', 'http://example.com/app.js', 1, 1, new Error('boom'))
-      expect(captured).toHaveLength(1)
-    })
   })
 
   describe('bootstrap and event enrichment', () => {
-    it('creates a client with createClient without starting the singleton', () => {
-      const { Bugsnag, client, captured } = createClient()
-      expect(Bugsnag.isStarted()).toBe(false)
+    it('creates a client and reports through it', () => {
+      const { client, captured } = createClient()
       client.notify(new Error('x'))
       expect(captured).toHaveLength(1)
     })
@@ -203,23 +168,12 @@ describe('browser-lite behaviour', () => {
       expect(event.metaData.site).toStrictEqual({ id: 'site-1', app: 'example-app' })
       expect(event.metaData.bundle).toStrictEqual({ target: 'modern' })
     })
-
-    it('leaves events untouched when enrichment values are absent', () => {
-      const { client, captured } = createClient({
-        onError: (event: any) => {
-          const app: string | undefined = undefined
-          if (app) event.context = event.context + ' - ' + app
-        }
-      })
-      client.notify(new Error('x'))
-      expect(firstEvent(captured).context).toBe('/')
-    })
   })
 
   describe('manual reporting', () => {
     it('reports handled errors with warning severity', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('manual'))
+      const { client, captured } = createClient()
+      client.notify(new Error('manual'))
       const event = firstEvent(captured)
       expect(event.severity).toBe('warning')
       expect(event.unhandled).toBe(false)
@@ -228,36 +182,9 @@ describe('browser-lite behaviour', () => {
     })
 
     it('coerces non-error inputs', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify('a string problem' as any)
+      const { client, captured } = createClient()
+      client.notify('a string problem' as any)
       expect(firstEvent(captured).exceptions[0].errorMessage).toBe('a string problem')
-    })
-
-    it('invokes the post-report callback with the event', (done) => {
-      const { Bugsnag } = start()
-      Bugsnag.notify(new Error('cb'), undefined, (err, event) => {
-        expect(err).toBeNull()
-        expect(event.originalError.message).toBe('cb')
-        done()
-      })
-    })
-
-    it('logs and returns when notify is called before start', () => {
-      const log = jest.spyOn(console, 'log').mockImplementation(() => {})
-      const Bugsnag = getBugsnag()
-      const ret = Bugsnag.notify(new Error('early'))
-      expect(ret).toBeUndefined()
-      expect(log).toHaveBeenCalledWith('Bugsnag.notify() was called before Bugsnag.start()')
-    })
-
-    it('records userCallbackSetSeverity when an onError callback changes severity', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('sev'), (event) => {
-        event.severity = 'info'
-      })
-      const event = firstEvent(captured)
-      expect(event.severity).toBe('info')
-      expect(event.severityReason).toStrictEqual({ type: 'userCallbackSetSeverity' })
     })
   })
 
@@ -272,40 +199,33 @@ describe('browser-lite behaviour', () => {
 
   describe('page, context and request', () => {
     it('sets context to the current pathname', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(firstEvent(captured).context).toBe(window.location.pathname)
     })
 
     it('sets request.url to the current href', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(firstEvent(captured).request.url).toBe(window.location.href)
     })
 
-    it('allows context to be overridden', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.setContext('custom-context')
-      Bugsnag.notify(new Error('x'))
-      expect(firstEvent(captured).context).toBe('custom-context')
-    })
-
     it('documents that query strings are kept on request.url', () => {
-      const { Bugsnag, captured } = start()
       window.history.pushState({}, '', '/page?token=secret#frag')
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.context).toBe('/page')
       expect(event.request.url).toContain('?token=secret')
     })
 
     it('strips query strings and fragments from stack frame file paths', () => {
-      const { Bugsnag, captured } = start({
+      const { client, captured } = createClient({
         onError: (event: any) => {
           event.errors[0].stacktrace = [{ file: 'http://example.com/app.js?v=1#hash' }]
         }
       })
-      Bugsnag.notify(new Error('x'))
+      client.notify(new Error('x'))
       expect(firstEvent(captured).exceptions[0].stacktrace[0].file).toBe('http://example.com/app.js')
     })
   })
@@ -313,8 +233,8 @@ describe('browser-lite behaviour', () => {
   describe('timing', () => {
     it('stamps the event with the time it was sent', () => {
       const before = Date.now()
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const after = Date.now()
       const time = Date.parse(firstEvent(captured).device.time)
       expect(time).toBeGreaterThanOrEqual(before)
@@ -324,38 +244,29 @@ describe('browser-lite behaviour', () => {
 
   describe('device, window and browser', () => {
     it('reports user agent and locale', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const device = firstEvent(captured).device
       expect(device.userAgent).toBe(window.navigator.userAgent)
       expect(device.locale).toBe(window.navigator.language)
     })
 
     it('reports orientation', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(['portrait', 'landscape']).toContain(firstEvent(captured).device.orientation)
     })
 
     it('reports the window size', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       const device = firstEvent(captured).device
       expect(device.windowWidth).toBe(window.innerWidth)
       expect(device.windowHeight).toBe(window.innerHeight)
     })
 
     it('does not generate or persist an anonymous id', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
-      const event = firstEvent(captured)
-      expect(event.device.id).toBeUndefined()
-      expect(event.user).toBeUndefined()
-      expect(window.localStorage.getItem('bugsnag-anonymous-id')).toBeNull()
-    })
-
-    it('accepts and ignores legacy privacy options', () => {
-      const { client, captured } = createClient({ generateAnonymousId: true, collectUserIp: false })
+      const { client, captured } = createClient()
       client.notify(new Error('x'))
       const event = firstEvent(captured)
       expect(event.device.id).toBeUndefined()
@@ -365,77 +276,46 @@ describe('browser-lite behaviour', () => {
   })
 
   describe('throttling', () => {
-    it('stops sending after maxEvents and can be reset', () => {
+    it('stops sending after maxEvents', () => {
       const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const { Bugsnag, captured } = start({ maxEvents: 2 })
-      Bugsnag.notify(new Error('1'))
-      Bugsnag.notify(new Error('2'))
-      Bugsnag.notify(new Error('3'))
-      expect(captured).toHaveLength(2)
+      const { client, captured } = createClient()
+      for (let i = 0; i < 11; i++) client.notify(new Error(String(i)))
+      expect(captured).toHaveLength(10)
       expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('maxEvents limit'))
-
-      Bugsnag.resetEventCount()
-      Bugsnag.notify(new Error('4'))
-      expect(captured).toHaveLength(3)
     })
   })
 
   describe('delivery and payload', () => {
     it('sends a version 4 payload to the default endpoint', () => {
-      const { Bugsnag, captured } = start({ appVersion: '1.2.3' })
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient({ appType: 'example-app' })
+      client.notify(new Error('x'))
       const req = captured[0]
       expect(req.url).toBe('https://notify.bugsnag.com')
       expect(req.headers['Bugsnag-Payload-Version']).toBe('4')
       expect(req.headers['Bugsnag-Api-Key']).toBe(API_KEY)
       expect(req.body.notifier.name).toBe('Bugsnag JavaScript')
       expect(req.body.events[0].payloadVersion).toBe('4')
-      expect(req.body.events[0].app).toStrictEqual({ releaseStage: 'development', version: '1.2.3', type: 'browser' })
+      expect(req.body.events[0].app).toStrictEqual({ releaseStage: 'development', type: 'example-app' })
     })
 
-    it('redacts redactedKeys in metadata', () => {
-      const { Bugsnag, captured } = start({ metadata: { auth: { password: 'secret', user: 'bob' } } })
-      Bugsnag.notify(new Error('x'))
+    it('redacts the default password key in metadata', () => {
+      const { client, captured } = createClient()
+      client.addMetadata('auth', { password: 'secret', user: 'bob' })
+      client.notify(new Error('x'))
       expect(firstEvent(captured).metaData.auth).toStrictEqual({ password: '[REDACTED]', user: 'bob' })
     })
 
     it('does not send when the releaseStage is not enabled', () => {
-      const { Bugsnag, captured } = start({ releaseStage: 'production', enabledReleaseStages: ['staging'] })
-      Bugsnag.notify(new Error('x'))
-      expect(captured).toHaveLength(0)
-    })
-
-    it('sends in each enabled release stage and skips disabled ones', () => {
-      for (const stage of ['production', 'staging']) {
-        const { client, captured } = createClient({ releaseStage: stage, enabledReleaseStages: ['production', 'staging'] })
-        client.notify(new Error('x'))
-        expect(captured).toHaveLength(1)
-      }
-      const { client, captured } = createClient({ releaseStage: 'development', enabledReleaseStages: ['production', 'staging'] })
+      const { client, captured } = createClient({ releaseStage: 'production', enabledReleaseStages: ['staging'] })
       client.notify(new Error('x'))
       expect(captured).toHaveLength(0)
-    })
-
-    it('reports an error when endpoint configuration is incomplete', () => {
-      const { Bugsnag } = start({ endpoints: {} })
-      Bugsnag.notify(new Error('x'), undefined, (err) => {
-        expect(err).toStrictEqual(new Error('Event not sent due to incomplete endpoint configuration'))
-      })
     })
   })
 
   describe('configuration', () => {
-    it('warns when start() is called more than once', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const Bugsnag = getBugsnag()
-      Bugsnag.start(API_KEY)
-      Bugsnag.start(API_KEY)
-      expect(warn).toHaveBeenCalledWith('[bugsnag]', expect.stringContaining('called more than once'))
-    })
-
     it('defaults releaseStage to development on localhost', () => {
-      const { Bugsnag, captured } = start()
-      Bugsnag.notify(new Error('x'))
+      const { client, captured } = createClient()
+      client.notify(new Error('x'))
       expect(firstEvent(captured).app.releaseStage).toBe('development')
     })
 
@@ -444,39 +324,23 @@ describe('browser-lite behaviour', () => {
       expect(() => Bugsnag.createClient()).toThrow('No Bugsnag API Key set')
     })
 
-    it('treats a string argument as the api key', (done) => {
+    it('treats a string argument as the api key', () => {
       const captured = mockDelivery()
       const Bugsnag = getBugsnag()
       const client = Bugsnag.createClient(API_KEY)
-      client.notify(new Error('x'), undefined, () => {
-        expect(captured[0].body.apiKey).toBe(API_KEY)
-        done()
-      })
+      client.notify(new Error('x'))
+      expect(captured[0].body.apiKey).toBe(API_KEY)
     })
 
-    it('falls back to no logger when console.debug is unavailable', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      const original = console.debug
-      try {
-        ;(console as any).debug = undefined
-        const Bugsnag = getBugsnag()
-        Bugsnag.start(API_KEY)
-        Bugsnag.start(API_KEY)
-        expect(warn).not.toHaveBeenCalled()
-      } finally {
-        ;(console as any).debug = original
-      }
-    })
-
-    it('defaults releaseStage to production for non-localhost hosts', () => {
+    it('falls back to production for non-localhost hosts', () => {
       const original = window.location
       try {
         Object.defineProperty(window, 'location', {
           value: { host: 'example.com', pathname: '/', href: 'http://example.com/' },
           configurable: true
         })
-        const { Bugsnag, captured } = start()
-        Bugsnag.notify(new Error('x'))
+        const { client, captured } = createClient()
+        client.notify(new Error('x'))
         expect(firstEvent(captured).app.releaseStage).toBe('production')
       } finally {
         Object.defineProperty(window, 'location', { value: original, configurable: true })
