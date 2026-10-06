@@ -53,6 +53,23 @@ describe('plugin-window-onerror', () => {
     expect(client.events[0].errors[0].errorMessage).toBe('legacy msg')
   })
 
+  it('uses a synthetic event detail as the message when there is no message', () => {
+    const win: any = {}
+    const client = makeClient()
+    makePlugin(win).load(client)
+    win.onerror({ detail: 'detailed' }, { extra: 1 })
+    expect(client.events[0].errors[0].errorMessage).toBe('detailed')
+  })
+
+  it('uses a generic name and empty message for a synthetic event with no type or message', () => {
+    const win: any = {}
+    const client = makeClient()
+    makePlugin(win).load(client)
+    win.onerror({}, { extra: 1 })
+    expect(client.events[0].errors[0].errorClass).toBe('Error')
+    expect(client.events[0].errors[0].errorMessage).toBe('')
+  })
+
   it('ignores cross-domain script errors', () => {
     const win: any = {}
     const client = makeClient()
@@ -96,6 +113,69 @@ describe('plugin-window-onerror', () => {
     makePlugin(win2, 'window onerror').load(client2)
     expect(win2.onerror).toBeUndefined()
   })
+
+  describe('stack decoration', () => {
+    function fakeClient (stack: any[]) {
+      const event: any = { errors: [{ stacktrace: stack }], addMetadata: jest.fn(), originalError: null }
+      return {
+        _config: { autoDetectErrors: true, enabledErrorTypes: { unhandledExceptions: true } },
+        _logger: makeLogger(),
+        Event: { create: jest.fn(() => event) },
+        _notify: jest.fn(),
+        event
+      }
+    }
+
+    it('creates a frame when there is none and fills in file, line and column', () => {
+      const client: any = fakeClient([])
+      const win: any = {}
+      makePlugin(win).load(client)
+      win.onerror('msg', 'http://x/a.js', 5, 6, new Error('boom'))
+      expect(client.event.errors[0].stacktrace[0]).toStrictEqual({ file: 'http://x/a.js', lineNumber: 5, columnNumber: 6 })
+    })
+
+    it('ignores a non-string url and non-numeric positions', () => {
+      const client: any = fakeClient([])
+      const win: any = {}
+      makePlugin(win).load(client)
+      win.onerror('msg', { not: 'a string' }, 'x', 'y', new Error('boom'))
+      expect(client.event.errors[0].stacktrace[0]).toStrictEqual({})
+    })
+
+    it('leaves an already-populated frame untouched', () => {
+      const client: any = fakeClient([{ file: 'f', lineNumber: 1, columnNumber: 2 }])
+      const win: any = {}
+      makePlugin(win).load(client)
+      win.onerror('msg', 'http://x/a.js', 5, 6, new Error('boom'))
+      expect(client.event.errors[0].stacktrace[0]).toStrictEqual({ file: 'f', lineNumber: 1, columnNumber: 2 })
+    })
+
+    it('uses window.event.errorCharacter when charNo is absent', () => {
+      const client: any = fakeClient([])
+      const win: any = {}
+      makePlugin(win).load(client)
+      ;(window as any).event = { errorCharacter: 9 }
+      try {
+        win.onerror('msg', undefined, undefined, undefined, new Error('boom'))
+      } finally {
+        delete (window as any).event
+      }
+      expect(client.event.errors[0].stacktrace[0]).toStrictEqual({ columnNumber: 9 })
+    })
+
+    it('ignores a non-numeric window.event.errorCharacter', () => {
+      const client: any = fakeClient([])
+      const win: any = {}
+      makePlugin(win).load(client)
+      ;(window as any).event = { errorCharacter: 'nope' }
+      try {
+        win.onerror('msg', undefined, undefined, undefined, new Error('boom'))
+      } finally {
+        delete (window as any).event
+      }
+      expect(client.event.errors[0].stacktrace[0]).toStrictEqual({})
+    })
+  })
 })
 
 describe('plugin-window-unhandled-rejection', () => {
@@ -127,6 +207,22 @@ describe('plugin-window-unhandled-rejection', () => {
     makePlugin(win).load(client)
     listener({ reason: new Error('r') })
     expect(client.events[0]._handledState.unhandled).toBe(false)
+  })
+
+  it('fixes a Bluebird stacktrace by dropping the spurious frame and trimming methods', () => {
+    let listener: any
+    const win: any = { addEventListener: (type: string, fn: any) => { listener = fn }, removeEventListener: jest.fn() }
+    const reason: any = new Error('bluebird')
+    const frames = [
+      { file: reason.toString() },
+      { file: 'http://x/a.js', method: '   padded' }
+    ]
+    const event: any = { errors: [{ stacktrace: frames }], originalError: reason, addMetadata: jest.fn() }
+    const client = makeClient({ Event: { create: jest.fn(() => event) } })
+    makePlugin(win).load(client)
+    listener({ detail: { reason } })
+    expect(frames[0].file).toBe(reason.toString())
+    expect(frames[1].method).toBe('padded')
   })
 
   it('adds metadata for an error reason without a stack', () => {
@@ -161,6 +257,25 @@ describe('plugin-window-unhandled-rejection', () => {
     plugin2.load(makeClient())
     plugin2.destroy(win2)
     expect(win2.onunhandledrejection).toBeNull()
+  })
+
+  it('destroy defaults its window and is a no-op once already destroyed', () => {
+    const plugin = makePlugin({ addEventListener: jest.fn(), removeEventListener: jest.fn() })
+    plugin.load(makeClient())
+    plugin.destroy()
+    expect(() => plugin.destroy()).not.toThrow()
+  })
+
+  it('does not define destroy in production builds', () => {
+    const original = process.env.NODE_ENV
+    try {
+      process.env.NODE_ENV = 'production'
+      jest.resetModules()
+      const prodPlugin = require('@bugsnag/plugin-window-unhandled-rejection')
+      expect(prodPlugin({}).destroy).toBeUndefined()
+    } finally {
+      process.env.NODE_ENV = original
+    }
   })
 
   it('does nothing when disabled', () => {
@@ -203,6 +318,27 @@ describe('plugin-console-breadcrumbs', () => {
     const noLog = { _config: { releaseStage: 'production' }, _isBreadcrumbTypeEnabled: () => false, leaveBreadcrumb: jest.fn() }
     plugin.load(noLog)
     expect(console.log).toBe(realConsole.log)
+  })
+
+  it('destroying twice is safe', () => {
+    const leaveBreadcrumb = jest.fn()
+    const client = { _config: { releaseStage: 'production' }, _isBreadcrumbTypeEnabled: () => true, leaveBreadcrumb }
+    plugin.load(client)
+    plugin.destroy()
+    plugin.destroy()
+    expect(console.log).toBe(realConsole.log)
+  })
+
+  it('does not define destroy in production builds', () => {
+    const original = process.env.NODE_ENV
+    try {
+      process.env.NODE_ENV = 'production'
+      jest.resetModules()
+      const prodPlugin = require('@bugsnag/plugin-console-breadcrumbs')
+      expect(prodPlugin.destroy).toBeUndefined()
+    } finally {
+      process.env.NODE_ENV = original
+    }
   })
 })
 

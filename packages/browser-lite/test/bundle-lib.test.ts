@@ -74,6 +74,7 @@ describe('metadata-delegate', () => {
     expect(state.account).toBeUndefined()
     md.clear(state, 123 as any)
     md.clear(state, '__proto__', 'x')
+    md.clear(state, 'missing', 'key')
     expect(state).toStrictEqual({})
   })
 })
@@ -257,6 +258,25 @@ describe('es-utils', () => {
     const source = Object.create({ inherited: 1 })
     source.own = 2
     expect(assign({}, source)).toStrictEqual({ own: 2 })
+  })
+
+  it('re-adds the DontEnum keys when the engine has the legacy bug', () => {
+    const original = Object.prototype.propertyIsEnumerable
+    // force the module to detect the (historically real) IE DontEnum bug
+    // eslint-disable-next-line no-extend-native
+    Object.prototype.propertyIsEnumerable = function (prop: string) {
+      if (prop === 'toString') return false
+      return original.call(this, prop)
+    }
+    try {
+      jest.resetModules()
+      const keysWithBug = require('@bugsnag/core/lib/es-utils/keys')
+      const obj = { toString: 1 }
+      expect(keysWithBug(obj)).toContain('toString')
+    } finally {
+      // eslint-disable-next-line no-extend-native
+      Object.prototype.propertyIsEnumerable = original
+    }
   })
 })
 

@@ -493,6 +493,10 @@ mocked `XMLHttpRequest` and the jsdom environment
   `test/bundle-event.test.ts`, `test/bundle-plugins.test.ts`,
   `test/bundle-delivery.test.ts` — direct tests for every first-party module that
   ends up in the bundle (core lib, client, event, config, each plugin, delivery).
+- `test/bundle-client-edge.test.ts` — the one branch of `Client#_notify` that is
+  only reachable by replacing the internal callback runner.
+- `test/bundle-console-group.test.ts` — pins the `group*` severity branch of the
+  console-breadcrumbs plugin by replacing the internal `filter` module.
 
 ### 15.1 Bundle coverage
 
@@ -503,13 +507,20 @@ bundle contains and runs only the browser-lite tests. Run it with:
 npx jest --config packages/browser-lite/jest.coverage.config.js --coverage
 ```
 
-Current bundle coverage: **~97% statements, ~91% branches, ~98% functions, ~98%
-lines** across ~190 tests. `packages/browser-lite/src` itself is at 100% for all
+Current bundle coverage: **100% statements, 100% branches, 100% functions, 100%
+lines** across ~230 tests. `packages/browser-lite/src` itself is at 100% for all
 metrics.
 
-The one knowingly-unreachable region is `core/lib/es-utils/keys.js` lines 18–21:
-the legacy "dontEnum bug" shim for old IE. Its guard is `false` in every modern
-engine, so the loop cannot execute; it caps that file at 60% statements.
+Two regions are unreachable in a modern engine and are exercised by temporarily
+changing the environment rather than by production code paths:
+
+- `core/lib/es-utils/keys.js` lines 18–21 — the legacy "dontEnum bug" shim for
+  old IE. Its guard is `false` in every modern engine, so the test replaces
+  `Object.prototype.propertyIsEnumerable` and re-requires the module to make the
+  guard `true`.
+- `plugin-console-breadcrumbs` line 31 — the `method.indexOf('group') === 0`
+  severity branch. The plugin only wraps `log`/`debug`/`info`/`warn`/`error`, so
+  the test replaces the internal `filter` module to wrap a `group` method.
 
 Notes for writing tests here:
 
@@ -575,3 +586,13 @@ assert that the legacy options are accepted and ignored.
 Any server-side emission of the config values (API key, release stage, app
 identity) and CSP allow-listing are outside the client behaviour described here.
 No `appVersion`, `codeBundleId`, or source-map upload is configured.
+
+## 17. Supported browsers
+
+`browser-lite` must run on the browser versions below. A build may target any
+one of the named, date-stamped ranges; the runtime must not rely on language or
+platform features newer than the range it targets.
+
+| Chrome | Firefox | Safari | Other |
+| --- | --- | --- | --- |
+| >= 47 | >= 43 | >= 10 | Edge >= 15, Opera >= 42, Samsung >= 5 |

@@ -27,6 +27,18 @@ describe('core Client', () => {
     expect(typeof client.Session).toBe('function')
   })
 
+  it('uses the default schema and an empty plugin list when they are omitted', () => {
+    const withDefaults: any = new Client({ apiKey: API_KEY })
+    expect(withDefaults._config.apiKey).toBe(API_KEY)
+
+    // a schema with no apiKey skips the fatal-apiKey check, and a schema with no
+    // onError/onBreadcrumb/onSession keys leaves those callback lists empty
+    const minimalSchema = { appVersion: { defaultValue: () => undefined, validate: () => true } }
+    const minimal: any = new Client({}, minimalSchema, undefined, notifier)
+    expect(minimal._config.appVersion).toBeUndefined()
+    expect(minimal._cbs).toStrictEqual({ e: [], s: [], sp: [], b: [] })
+  })
+
   describe('metadata', () => {
     it('adds, gets and clears metadata', () => {
       const { client } = makeClient()
@@ -57,6 +69,13 @@ describe('core Client', () => {
       client.clearFeatureFlags()
       client.notify(new Error('z'))
       expect(sent[2].events[0].getFeatureFlags()).toStrictEqual([])
+    })
+
+    it('defaults a feature flag variant to null', () => {
+      const { client, sent } = makeClient()
+      client.addFeatureFlag('flag')
+      client.notify(new Error('x'))
+      expect(sent[0].events[0].getFeatureFlags()).toStrictEqual([{ featureFlag: 'flag' }])
     })
   })
 
@@ -107,6 +126,15 @@ describe('core Client', () => {
       cb.mockClear()
       client.leaveBreadcrumb('b')
       expect(cb).not.toHaveBeenCalled()
+    })
+
+    it('can prepend a breadcrumb callback to the list', () => {
+      const { client } = makeClient()
+      const a = jest.fn()
+      const b = jest.fn()
+      client.addOnBreadcrumb(a)
+      client.addOnBreadcrumb(b, true)
+      expect(client._cbs.b).toStrictEqual([b, a])
     })
 
     it('adds and removes session callbacks without them ever firing', () => {
@@ -248,6 +276,11 @@ describe('core Client', () => {
       makeClient({}, [{ load }])
       expect(load).toHaveBeenCalled()
     })
+
+    it('skips falsy entries in the internal plugin list', () => {
+      const { client } = makeClient({}, [null, undefined, { name: 'ok', load: () => 7 }])
+      expect(client.getPlugin('ok')).toBe(7)
+    })
   })
 
   describe('config validation', () => {
@@ -316,6 +349,18 @@ describe('core Client', () => {
       makeClient({ logger: { debug: jest.fn(), info: jest.fn(), warn, error: jest.fn() }, enabledErrorTypes: 'nope' } as any)
       makeClient({ logger: { debug: jest.fn(), info: jest.fn(), warn, error: jest.fn() }, enabledErrorTypes: { unhandledExceptions: 'yes' } } as any)
       expect(warn).toHaveBeenCalled()
+    })
+
+    it('short-circuits enabledBreadcrumbTypes validation once a bad entry is found', () => {
+      const warn = jest.fn()
+      const { client } = makeClient({
+        logger: { debug: jest.fn(), info: jest.fn(), warn, error: jest.fn() },
+        enabledBreadcrumbTypes: ['nope', 'log']
+      } as any)
+      expect(warn).toHaveBeenCalled()
+      expect(client._config.enabledBreadcrumbTypes).toStrictEqual(
+        expect.arrayContaining(['log', 'manual'])
+      )
     })
 
     it('validates the remaining boolean and list options', () => {

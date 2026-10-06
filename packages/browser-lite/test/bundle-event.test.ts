@@ -70,6 +70,37 @@ describe('core Event', () => {
       const event: any = Event.create(err, true, undefined, 'notify()')
       expect(event.errors.length).toBeGreaterThanOrEqual(1)
     })
+
+    it('records metadata for a cause that is not a valid error', () => {
+      const err: any = new Error('outer')
+      err.cause = {}
+      const event: any = Event.create(err, true, undefined, 'notify()')
+      expect(event.getMetadata('error cause')).toStrictEqual({})
+    })
+
+    it('coerces non-string error classes and messages to empty strings', () => {
+      const event: any = new Event(123 as any, 456 as any)
+      expect(event.errors[0].errorClass).toBe('')
+      expect(event.errors[0].errorMessage).toBe('')
+    })
+
+    it('adopts a stack that only becomes available once the error is thrown', () => {
+      // an Error that reports no stack on its first read but does on later reads,
+      // mirroring the IE10/11 behaviour normaliseError works around
+      let reads = 0
+      const err: any = Object.create(Error.prototype)
+      Object.defineProperty(err, 'name', { value: 'Error' })
+      Object.defineProperty(err, 'message', { value: 'late-stack' })
+      Object.defineProperty(err, 'stack', {
+        configurable: true,
+        get () {
+          reads++
+          return reads >= 2 ? 'Error: late-stack\n    at foo (http://x/a.js:1:1)' : undefined
+        }
+      })
+      const event: any = Event.create(err, true, undefined, 'notify()')
+      expect(event.errors[0].errorMessage).toBe('late-stack')
+    })
   })
 
   describe('stacktrace formatting', () => {
@@ -99,6 +130,51 @@ describe('core Event', () => {
     it('drops frames with no usable data', () => {
       const event: any = new Event('Error', 'x', [{}])
       expect(event.errors[0].stacktrace).toStrictEqual([])
+    })
+
+    it('normalises a "global code" function name', () => {
+      const event: any = new Event('Error', 'x', [{ functionName: 'global code', lineNumber: 1 }])
+      expect(event.errors[0].stacktrace[0].method).toBe('global code')
+    })
+
+    it('drops a frame that cannot be serialised', () => {
+      const event: any = new Event('Error', 'x', [{ fileName: BigInt(1) } as any])
+      expect(event.errors[0].stacktrace).toStrictEqual([])
+    })
+
+    it('falls back to an empty stacktrace when stack generation throws', () => {
+      const original = Event.getStacktrace
+      Event.getStacktrace = () => { throw new Error('boom') }
+      try {
+        const event: any = Event.create(new Error('x'), true, undefined, 'notify()')
+        expect(event.errors[0].stacktrace).toStrictEqual([])
+      } finally {
+        Event.getStacktrace = original
+      }
+    })
+
+    it('uses the empty-string fallback for generated frames with no function name', () => {
+      const StackGenerator = require('stack-generator')
+      const original = StackGenerator.backtrace
+      StackGenerator.backtrace = () => [{ functionName: 'named' }, { functionName: undefined }]
+      try {
+        const frames = Event.getStacktrace({}, 0, 0)
+        expect(frames).toHaveLength(1)
+        expect(frames[0].functionName).toBeUndefined()
+      } finally {
+        StackGenerator.backtrace = original
+      }
+    })
+
+    it('returns an empty stacktrace when walking the call stack throws', () => {
+      const StackGenerator = require('stack-generator')
+      const original = StackGenerator.backtrace
+      StackGenerator.backtrace = () => { throw new Error('no call stack') }
+      try {
+        expect(Event.getStacktrace({}, 0, 0)).toStrictEqual([])
+      } finally {
+        StackGenerator.backtrace = original
+      }
     })
   })
 
@@ -134,10 +210,11 @@ describe('core Event', () => {
     it('adds, merges and clears feature flags', () => {
       const event: any = new Event('Error', 'x')
       event.addFeatureFlag('a', '1')
+      event.addFeatureFlag('c')
       event.addFeatureFlags([{ name: 'b' }])
-      expect(event.getFeatureFlags()).toStrictEqual([{ featureFlag: 'a', variant: '1' }, { featureFlag: 'b' }])
+      expect(event.getFeatureFlags()).toStrictEqual([{ featureFlag: 'a', variant: '1' }, { featureFlag: 'c' }, { featureFlag: 'b' }])
       event.clearFeatureFlag('a')
-      expect(event.getFeatureFlags()).toStrictEqual([{ featureFlag: 'b' }])
+      expect(event.getFeatureFlags()).toStrictEqual([{ featureFlag: 'c' }, { featureFlag: 'b' }])
       event.clearFeatureFlags()
       expect(event.getFeatureFlags()).toStrictEqual([])
     })

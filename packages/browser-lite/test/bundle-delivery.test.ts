@@ -118,6 +118,51 @@ describe('delivery-xml-http-request sendEvent', () => {
     delivery(client, win).sendEvent(eventPayload(), () => {})
     expect(xhr.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
   })
+
+  it('defaults the callback and falls back to the configured api key', () => {
+    const client = makeClient()
+    const { win, xhr } = makeWin(200)
+    const payload: any = eventPayload()
+    delete payload.apiKey
+    expect(() => delivery(client, win).sendEvent(payload)).not.toThrow()
+    expect(xhr.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Api-Key', 'k')
+  })
+
+  it('ignores readystatechange events until the request is DONE', () => {
+    const client = makeClient()
+    const xhr: any = {
+      readyState: 2,
+      status: 200,
+      open: jest.fn(),
+      setRequestHeader: jest.fn(),
+      send: jest.fn()
+    }
+    const win: any = { XMLHttpRequest: Object.assign(jest.fn(() => xhr), { DONE: 4 }) }
+    const cb = jest.fn()
+    delivery(client, win).sendEvent(eventPayload(), cb)
+    xhr.onreadystatechange()
+    expect(cb).not.toHaveBeenCalled()
+    xhr.readyState = 4
+    xhr.onreadystatechange()
+    expect(cb).toHaveBeenCalledWith(null)
+  })
+
+  it('skips checksum computation when Promise is missing or not native', () => {
+    const client = makeClient({ _config: { endpoints: { notify: 'https://notify', sessions: 'https://s' }, redactedKeys: [], apiKey: 'k', sendPayloadChecksums: true } })
+    const { win, xhr } = makeWin(200, { isSecureContext: true, crypto: { subtle: { digest: jest.fn() } } })
+    const RealPromise = global.Promise
+    try {
+      // @ts-ignore
+      global.Promise = undefined
+      delivery(client, win).sendEvent(eventPayload(), () => {})
+      // @ts-ignore
+      global.Promise = function FakePromise () {}
+      delivery(client, win).sendEvent(eventPayload(), () => {})
+    } finally {
+      global.Promise = RealPromise
+    }
+    expect(xhr.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
+  })
 })
 
 describe('delivery-xml-http-request sendSession', () => {
@@ -155,5 +200,53 @@ describe('delivery-xml-http-request sendSession', () => {
     win.XMLHttpRequest.DONE = 4
     expect(() => delivery(client, win).sendSession(sessionPayload(), () => {})).not.toThrow()
     expect(client._logger.error).toHaveBeenCalled()
+  })
+
+  it('defaults the callback and ignores readystatechange until DONE', () => {
+    const client = makeClient()
+    const xhr: any = {
+      readyState: 2,
+      status: 200,
+      open: jest.fn(),
+      setRequestHeader: jest.fn(),
+      send: jest.fn()
+    }
+    const win: any = { XMLHttpRequest: Object.assign(jest.fn(() => xhr), { DONE: 4 }) }
+    expect(() => delivery(client, win).sendSession(sessionPayload())).not.toThrow()
+    xhr.onreadystatechange()
+    xhr.readyState = 4
+    xhr.onreadystatechange()
+    expect(xhr.open).toHaveBeenCalledWith('POST', 'https://sessions')
+  })
+
+  it('adds an integrity header to sessions when checksums are enabled', (done) => {
+    const client = makeClient({ _config: { endpoints: { notify: 'https://notify', sessions: 'https://s' }, redactedKeys: [], apiKey: 'k', sendPayloadChecksums: true } })
+    const crypto = { subtle: { digest: () => Promise.resolve(new ArrayBuffer(20)) } }
+    const { win, xhr } = makeWin(200, { isSecureContext: true, crypto })
+    delivery(client, win).sendSession(sessionPayload(), () => {
+      expect(xhr.setRequestHeader).toHaveBeenCalledWith('Bugsnag-Integrity', expect.stringContaining('sha1 '))
+      done()
+    })
+  })
+
+  it('sends without an integrity header when the digest fails', (done) => {
+    const client = makeClient({ _config: { endpoints: { notify: 'https://notify', sessions: 'https://s' }, redactedKeys: [], apiKey: 'k', sendPayloadChecksums: true } })
+    const crypto = { subtle: { digest: () => Promise.reject(new Error('nope')) } }
+    const { win, xhr } = makeWin(200, { isSecureContext: true, crypto })
+    delivery(client, win).sendSession(sessionPayload(), () => {
+      expect(xhr.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
+      expect(client._logger.error).toHaveBeenCalled()
+      done()
+    })
+  })
+
+  it('sends without an integrity header when the context is not secure', (done) => {
+    const client = makeClient({ _config: { endpoints: { notify: 'https://notify', sessions: 'https://s' }, redactedKeys: [], apiKey: 'k', sendPayloadChecksums: true } })
+    const { win, xhr } = makeWin(200, { isSecureContext: false })
+    delivery(client, win).sendSession(sessionPayload(), (err: any) => {
+      expect(err).toBeNull()
+      expect(xhr.setRequestHeader).not.toHaveBeenCalledWith('Bugsnag-Integrity', expect.any(String))
+      done()
+    })
   })
 })
