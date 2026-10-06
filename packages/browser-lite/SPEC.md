@@ -53,10 +53,10 @@ packages/browser-lite/
 
 - `main`: `dist/bugsnag.js` (unminified bundle)
 - `types`: `types/bugsnag.d.ts`
-- Build: browserify + babelify + `browserify-versionify` (replaces
-  `__VERSION__`) + `envify` (`NODE_ENV=production`), bundled with
-  `browser-pack-flat`, then minified with uglify
-  (`--compress --mangle --ie8`).
+- Build (`build.js`): the source is already a self-contained ES3 UMD bundle, so
+  the build only substitutes `__VERSION__` with the package version and then
+  minifies with uglify (`--compress passes=3 --mangle --ie8`). No bundling,
+  transpilation or runtime/helper injection happens.
 - `bin/size` reports the **gzipped** size of `dist/bugsnag.min.js`.
 - The bundle exposes a UMD global named `Bugsnag`.
 
