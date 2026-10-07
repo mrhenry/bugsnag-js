@@ -104,13 +104,12 @@ describe('browser notifier', () => {
     expect(() => Bugsnag.createClient()).toThrow('No Bugsnag API Key set')
   })
 
-  it('warns about invalid options and falls back to defaults', () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+  it('uses supplied config values without validation', () => {
+    const { notify } = mockFetch()
     const Bugsnag = getBugsnag()
     const client = Bugsnag.createClient({ apiKey: API_KEY, appType: 123 } as any)
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn.mock.calls[0][0]).toBe('[bugsnag]')
-    expect(warn.mock.calls[0][1].message).toContain('Invalid configuration')
-    expect(typeof client.notify).toBe('function')
+    client.notify(new Error('x'))
+    const body = JSON.parse(notify.send.mock.calls[0][0])
+    expect(body.events[0].app.type).toBe(123)
   })
 })

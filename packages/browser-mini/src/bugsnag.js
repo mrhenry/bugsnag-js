@@ -19,10 +19,6 @@ function isString (s) { return typeof s === 'string' }
 function isError (o) {
   return o instanceof Error || /^\[object (Error|(Dom)?Exception)\]$/.test(Object.prototype.toString.call(o))
 }
-function every (a, fn) {
-  for (var i = 0; i < a.length; i++) if (!fn(a[i])) return false
-  return true
-}
 function includes (a, x) {
   for (var i = 0; i < a.length; i++) if (a[i] === x) return true
   return false
@@ -221,23 +217,6 @@ function runCallbacks (callbacks, event, logger) {
 
 /* configuration */
 
-function stringWithLength (v) { return isString(v) && !!v.length }
-
-var schema = {
-  apiKey: [stringWithLength, null, 'invalid'],
-  appType: [stringWithLength, 'browser', 'invalid'],
-  onError: [function (v) { return isFn(v) || (isArray(v) && every(v, isFn)) }, [], 'invalid'],
-  enabledReleaseStages: [function (v) { return v === null || (isArray(v) && every(v, isString)) }, null, 'invalid'],
-  releaseStage: [stringWithLength, function () {
-    return /^localhost(:\d+)?$/.test(window.location.host) ? 'development' : 'production'
-  }, 'invalid']
-}
-
-function stringifyConfigValue (v) {
-  if (isString(v) || typeof v === 'number' || (v && typeof v === 'object')) return JSON.stringify(v)
-  return String(v)
-}
-
 function getLogger () {
   var logger = {}
     var methods = ['debug', 'warn', 'error']
@@ -267,27 +246,17 @@ function Client (configuration, notifier) {
 }
 
 Client.prototype._configure = function (opts) {
-  var config = {}
-  var errors = []
+  if (!opts.apiKey) throw new Error('No Bugsnag API Key set')
 
-  for (var key in schema) {
-    var def = schema[key]
-    var value = opts[key]
-    if (value !== undefined && def[0](value)) {
-      config[key] = value
-    } else {
-      if (value !== undefined) errors.push('  - ' + key + ' ' + def[2] + ', got ' + stringifyConfigValue(value))
-      config[key] = isFn(def[1]) ? def[1]() : def[1]
-    }
+  if (opts.onError) this._cbs = [].concat(opts.onError)
+
+  return {
+    apiKey: opts.apiKey,
+    appType: opts.appType || 'browser',
+    onError: opts.onError || [],
+    enabledReleaseStages: opts.enabledReleaseStages || null,
+    releaseStage: opts.releaseStage || 'development'
   }
-
-  if (!config.apiKey) throw new Error('No Bugsnag API Key set')
-  if (!/^[0-9a-f]{32}$/i.test(config.apiKey)) errors.push('  - apiKey should be a string of 32 hexadecimal characters')
-
-  if (config.onError) this._cbs = [].concat(config.onError)
-  if (errors.length) this._logger.warn(new Error('Invalid configuration\n' + errors.join('\n\n')))
-
-  return config
 }
 
 Client.prototype.addMetadata = function (section, keyOrObj, maybeVal) {

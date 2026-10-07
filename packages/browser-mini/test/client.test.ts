@@ -1,4 +1,4 @@
-import { API_KEY, createClient, firstEvent, getBugsnag } from './helpers'
+import { createClient, firstEvent } from './helpers'
 
 const realConsole = {
   log: console.log,
@@ -81,23 +81,10 @@ describe('client public API', () => {
   })
 
   describe('configuration', () => {
-    it('warns about invalid options and falls back to defaults', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    it('uses supplied config values without validation', () => {
       const { client, captured } = createClient({ appType: 123 } as any)
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(warn.mock.calls[0][0]).toBe('[bugsnag]')
-      expect(warn.mock.calls[0][1].message).toContain('Invalid configuration')
       client.notify(new Error('x'))
-      expect(firstEvent(captured).app.type).toBe('browser')
-    })
-
-    it('stringifies unusual config values in the warning', () => {
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-      getBugsnag().createClient({ apiKey: API_KEY, appType: function () {} })
-      expect(warn).toHaveBeenCalledTimes(1)
-      const message = warn.mock.calls[0][1].message
-      expect(message).toContain('appType')
-      expect(message).toContain('got function')
+      expect(firstEvent(captured).app.type).toBe(123)
     })
 
     it('does not expose the session API', () => {

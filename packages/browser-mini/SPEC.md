@@ -104,13 +104,14 @@ context-setter methods. In particular: `startSession`, `pauseSession`,
 
 ## 4. Configuration
 
-Configuration is validated against a small schema defined in `src/bugsnag.js`.
-Unknown keys are ignored. An invalid value produces a warning log and falls back
-to that option's default.
+Configuration is **not validated**. Each known key is read as-is (a supplied
+value is used unchanged, even if malformed); unknown keys are ignored. The
+caller is expected to supply correct values. Defaults below apply only when a
+key is omitted.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `apiKey` | `null` | Required. If not 32 hex chars, warns `should be a string of 32 hexadecimal characters` but still starts. |
+| `apiKey` | `null` | Required (any truthy value is accepted; no format check). |
 | `appType` | `'browser'` | Sent as `event.app.type`. |
 | `onError` | `[]` | Function or array of functions. Return `false` to cancel sending. |
 | `enabledReleaseStages` | `null` | When non-null, events whose `releaseStage` is not included are not sent. |
@@ -298,6 +299,9 @@ Delivery sends the event as a POST via `XMLHttpRequest`:
 4. **Custom `device` fields may not render in the dashboard.** The window size is
    sent as `device.windowWidth` / `device.windowHeight`; mirror into `metaData`
    if UI display is needed.
+5. **No configuration validation.** Malformed or unsupported options are used
+   as-is (or ignored if unknown) with no warning; only a missing `apiKey` is
+   reported, by throwing.
 
 ## 15. Testing
 
@@ -307,7 +311,7 @@ mocked `XMLHttpRequest` and the jsdom environment
 (`jest/FixJSDOMEnvironment.js`).
 
 - `test/index.test.ts` — baseline suite (client creation, notify, config
-  validation).
+  passthrough).
 - `test/behaviour.test.ts` — behaviour driven by the stated intent: bootstrap
   and event enrichment, automatic capture, manual reporting, metadata,
   context/request/page, timing, device/browser, throttling, delivery/payload,
