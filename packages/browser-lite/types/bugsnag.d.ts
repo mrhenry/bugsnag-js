@@ -1,16 +1,20 @@
-import { Client, Config } from '@bugsnag/core'
+import { Client, Config, BugsnagStatic } from '@bugsnag/core'
 
-export interface BrowserConfig {
-  apiKey: string
-  appType?: string
-  enabledReleaseStages?: string[] | null
-  releaseStage?: string
-  onError?: Config['onError']
+interface BrowserConfig extends Config {
+  maxEvents?: number
+  collectUserIp?: boolean
+  generateAnonymousId?: boolean
+  trackInlineScripts?: boolean
+  sendPayloadChecksums?: boolean
 }
 
-export interface BrowserClient extends Omit<Client, 'startSession' | 'pauseSession' | 'resumeSession' | 'addOnSession' | 'removeOnSession' | 'getPlugin' | 'getUser' | 'setUser' | 'addFeatureFlag' | 'addFeatureFlags' | 'clearFeatureFlag' | 'clearFeatureFlags' | 'leaveBreadcrumb' | 'addOnBreadcrumb' | 'removeOnBreadcrumb' | 'getGroupingDiscriminator' | 'setGroupingDiscriminator' | 'getMetadata' | 'clearMetadata' | 'getContext' | 'setContext' | 'removeOnError' | 'resetEventCount'> {}
+export interface BrowserBugsnagStatic extends Omit<BugsnagStatic, 'startSession' | 'pauseSession' | 'resumeSession'> {
+  start(apiKeyOrOpts: string | BrowserConfig): Client
+  createClient(apiKeyOrOpts: string | BrowserConfig): Client
+}
 
-export function createClient(apiKeyOrOpts: string | BrowserConfig): BrowserClient
+declare const Bugsnag: BrowserBugsnagStatic
 
+export default Bugsnag
 export * from '@bugsnag/core'
 export { BrowserConfig }
