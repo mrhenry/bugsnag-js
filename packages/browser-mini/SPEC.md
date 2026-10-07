@@ -1,6 +1,6 @@
-# `@mrhenry/browser-lite` — Behaviour Specification
+# `@mrhenry/browser-mini` — Behaviour Specification
 
-This document describes **how `browser-lite` currently works**, as implemented
+This document describes **how `browser-mini` currently works**, as implemented
 in the single self-contained `src/bugsnag.js` bundle.
 
 It is a description of the present, not a wishlist.
@@ -13,7 +13,7 @@ Upstream references:
 
 ## 1. Purpose and scope
 
-`browser-lite` is a deliberately minimal **error reporter** for browser
+`browser-mini` is a deliberately minimal **error reporter** for browser
 JavaScript.
 
 ### 1.1 What it is for (in scope)
@@ -42,7 +42,7 @@ JavaScript.
 ## 2. Package layout and build
 
 ```
-packages/browser-lite/
+packages/browser-mini/
   src/bugsnag.js       the whole notifier (single ES module, named exports)
   src/bugsnag.d.ts     type re-export
   types/bugsnag.d.ts   public type surface
@@ -64,11 +64,11 @@ packages/browser-lite/
 
 ## 3. Public API
 
-`@mrhenry/browser-lite` is an ES module. Its public API is a single named
+`@mrhenry/browser-mini` is an ES module. Its public API is a single named
 export, `createClient`. There is no default export and no global.
 
 ```js
-import { createClient } from '@mrhenry/browser-lite'
+import { createClient } from '@mrhenry/browser-mini'
 ```
 
 ### 3.1 Named exports
@@ -324,10 +324,10 @@ mocked `XMLHttpRequest` and the jsdom environment
 ### 15.1 Coverage
 
 `jest.coverage.config.js` instruments the single source file and runs only the
-browser-lite tests. Run it with:
+browser-mini tests. Run it with:
 
 ```
-npx jest --config packages/browser-lite/jest.coverage.config.js --coverage
+npx jest --config packages/browser-mini/jest.coverage.config.js --coverage
 ```
 
 ## 16. Consumer integration
@@ -352,7 +352,7 @@ package, which is representative of production usage:
 
 ## 17. Supported browsers
 
-`browser-lite` must run on the browser versions below. A build may target any
+`browser-mini` must run on the browser versions below. A build may target any
 one of the named, date-stamped ranges; the runtime must not rely on language or
 platform features newer than the range it targets.
 

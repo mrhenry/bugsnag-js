@@ -1,5 +1,5 @@
 {
-  "name": "@mrhenry/browser-lite",
+  "name": "@mrhenry/browser-mini",
   "version": "9.0.0",
   "main": "dist/bugsnag.js",
   "module": "dist/bugsnag.js",

@@ -1,5 +1,5 @@
 /*
- * @mrhenry/browser-lite
+ * @mrhenry/browser-mini
  *
  * A minimal, privacy-leaning Bugsnag error reporter for browsers.
  *

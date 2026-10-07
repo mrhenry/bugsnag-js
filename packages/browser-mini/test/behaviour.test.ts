@@ -67,7 +67,7 @@ function fireRejection (reason: any) {
   window.dispatchEvent(evt)
 }
 
-describe('browser-lite behaviour', () => {
+describe('browser-mini behaviour', () => {
   let rejectionListeners: any[] = []
   let originalAddEventListener: any
 

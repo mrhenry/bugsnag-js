@@ -2,7 +2,7 @@
 'use strict'
 
 /*
- * Builds `browser-lite` by doing the only two things that are still needed:
+ * Builds `browser-mini` by doing the only two things that are still needed:
  *
  *   1. substitute `__VERSION__` with the package version
  *   2. minify
