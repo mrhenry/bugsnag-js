@@ -10,6 +10,9 @@ const project = (displayName, packageNames, config = {}) => ({
 const extensions = 'js,jsx,ts,tsx'
 
 module.exports = {
+  modulePathIgnorePatterns: [
+    '<rootDir>/packages/[^/]+/dist/'
+  ],
   collectCoverageFrom: [
     `**/packages/*/**/*.{${extensions}}`,
     `!**/*.test.{${extensions}}`,
@@ -32,6 +35,8 @@ module.exports = {
     project('shared plugins', ['plugin-app-duration', 'plugin-stackframe-path-normaliser', 'request-tracker']),
     project('browser', [
       'browser',
+      'browser-lite',
+      'browser-mini',
       'delivery-x-domain-request',
       'delivery-xml-http-request',
       'delivery-fetch',
@@ -53,7 +58,8 @@ module.exports = {
       'plugin-browser-session',
       'plugin-network-instrumentation'
     ], {
-      testEnvironment: '<rootDir>/jest/FixJSDOMEnvironment.js'
+      testEnvironment: '<rootDir>/jest/FixJSDOMEnvironment.js',
+      modulePathIgnorePatterns: ['.verdaccio', 'dist', 'examples', 'fixtures']
     }),
     project('react native', [
       'react-native',
@@ -73,6 +79,9 @@ module.exports = {
       preset: 'react-native',
       setupFiles: [
         '<rootDir>/packages/react-native/src/test/setup.js'
+      ],
+      transformIgnorePatterns: [
+        'node_modules/(?!(react-native|@react-native|jest-react-native|@react-native-community)/)'
       ]
     }),
     project('node plugins', [

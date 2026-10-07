@@ -2,6 +2,13 @@
   "packages": [
     "packages/*"
   ],
-  "version": "8.8.1",
-  "$schema": "node_modules/lerna/schemas/lerna-schema.json"
+  "version": "9.0.0",
+  "$schema": "node_modules/lerna/schemas/lerna-schema.json",
+  "command": {
+    "publish": {
+      "npmClientArgs": [
+        "--legacy-peer-deps"
+      ]
+    }
+  }
 }

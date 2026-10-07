@@ -111,7 +111,10 @@ module.exports = (doc = document, win = window) => ({
       'CryptoOperation', 'EventSource', 'FileReader', 'HTMLUnknownElement', 'IDBDatabase',
       'IDBRequest', 'IDBTransaction', 'KeyOperation', 'MediaController', 'MessagePort', 'ModalWindow',
       'Notification', 'SVGElementInstance', 'Screen', 'TextTrack', 'TextTrackCue', 'TextTrackList',
-      'WebSocket', 'WebSocketWorker', 'Worker', 'XMLHttpRequest', 'XMLHttpRequestEventTarget', 'XMLHttpRequestUpload'
+      'WebSocket', 'WebSocketWorker', 'Worker', 'XMLHttpRequest', 'XMLHttpRequestEventTarget', 'XMLHttpRequestUpload',
+      'MediaSource', 'MediaRecorder', 'MediaStream', 'ServiceWorker', 'ServiceWorkerContainer',
+      'ServiceWorkerRegistration', 'BroadcastChannel', 'RTCPeerConnection', 'RTCDataChannel', 'AbortSignal',
+      'MediaQueryList', 'ShadowRoot', 'FontFaceSet', 'Animation', 'PermissionStatus', 'PaymentRequest', 'VideoTrackList'
     ], o => {
       if (!win[o] || !win[o].prototype || !Object.prototype.hasOwnProperty.call(win[o].prototype, 'addEventListener')) return
       __proxy(win[o].prototype, 'addEventListener', original =>
@@ -123,10 +126,9 @@ module.exports = (doc = document, win = window) => ({
     })
 
     function __traceOriginalScript (fn, callbackAccessor, alsoCallOriginal = false) {
-      return function () {
+      return function (...args) {
         // this is required for removeEventListener to remove anything added with
         // addEventListener before the functions started being wrapped by Bugsnag
-        const args = [].slice.call(arguments)
         try {
           const cba = callbackAccessor(args)
           const cb = cba.get()
@@ -139,14 +141,14 @@ module.exports = (doc = document, win = window) => ({
             // this function mustn't be annonymous due to a bug in the stack
             // generation logic, meaning it gets tripped up
             // see: https://github.com/stacktracejs/stack-generator/issues/6
-            cb.__trace__ = function __trace__ () {
+            cb.__trace__ = function __trace__ (...cbArgs) {
               // set the script that called this function
               updateLastScript(script)
               // immediately unset the currentScript synchronously below, however
               // if this cb throws an error the line after will not get run so schedule
               // an almost-immediate aysnc update too
               _setTimeout(function () { updateLastScript(null) }, 0)
-              const ret = cb.apply(this, arguments)
+              const ret = cb.apply(this, cbArgs)
               updateLastScript(null)
               return ret
             }
