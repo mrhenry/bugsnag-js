@@ -1,0 +1,46 @@
+{
+  "name": "@mrhenry/browser-mini",
+  "version": "9.0.0",
+  "main": "dist/bugsnag.js",
+  "module": "dist/bugsnag.js",
+  "types": "types/bugsnag.d.ts",
+  "description": "Bugsnag error reporter for browser JavaScript",
+  "homepage": "https://www.bugsnag.com/",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:mrhenry/bugsnag-js.git"
+  },
+  "browser": {
+    "types/bugsnag": "./dist/bugsnag.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "types"
+  ],
+  "scripts": {
+    "size": "../../bin/size dist/bugsnag.min.js",
+    "clean": "rm -fr dist && mkdir dist",
+    "build": "npm run clean && npm run build:dist && npm run build:dist:min",
+    "build:dist": "node build.js",
+    "build:dist:min": "node build.js --minify",
+    "cdn-upload": "../../bin/cdn-upload dist/*"
+  },
+  "author": "Bugsnag",
+  "license": "MIT",
+  "devDependencies": {
+    "@bugsnag/delivery-xml-http-request": "^9.0.0",
+    "@bugsnag/plugin-browser-context": "^9.0.0",
+    "@bugsnag/plugin-browser-request": "^9.0.0",
+    "@bugsnag/plugin-console-breadcrumbs": "^9.0.0",
+    "@bugsnag/plugin-simple-throttle": "^9.0.0",
+    "@bugsnag/plugin-strip-query-string": "^9.0.0",
+    "@bugsnag/plugin-window-onerror": "^9.0.0",
+    "@bugsnag/plugin-window-unhandled-rejection": "^9.0.0"
+  },
+  "dependencies": {
+    "@bugsnag/core": "^9.0.0"
+  }
+}

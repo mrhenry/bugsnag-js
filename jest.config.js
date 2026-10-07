@@ -36,6 +36,7 @@ module.exports = {
     project('browser', [
       'browser',
       'browser-lite',
+      'browser-mini',
       'delivery-x-domain-request',
       'delivery-xml-http-request',
       'delivery-fetch',
