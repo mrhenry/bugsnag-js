@@ -31,6 +31,13 @@ function assign (t) {
   }
   return t
 }
+function trim (str) {
+  var start = 0
+  var end = str.length
+  while (start < end && /\s/.test(str.charAt(start))) start++
+  while (end > start && /\s/.test(str.charAt(end - 1))) end--
+  return str.slice(start, end)
+}
 
 /* safe JSON serialisation (with key redaction) */
 
@@ -105,7 +112,7 @@ function makeFrame (fn, file, line, col) {
 }
 
 function parseStackLine (raw) {
-  var line = raw.replace(/^\s+|\s+$/g, '')
+  var line = trim(raw)
   if (!line) return null
   var m
 
