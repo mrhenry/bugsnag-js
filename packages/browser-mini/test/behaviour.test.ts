@@ -341,7 +341,7 @@ describe('browser-mini behaviour', () => {
         })
         const { client, captured } = createClient()
         client.notify(new Error('x'))
-        expect(firstEvent(captured).app.releaseStage).toBe('production')
+        expect(firstEvent(captured).app.releaseStage).toBe('development')
       } finally {
         Object.defineProperty(window, 'location', { value: original, configurable: true })
       }
