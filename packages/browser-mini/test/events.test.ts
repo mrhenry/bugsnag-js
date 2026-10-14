@@ -121,6 +121,24 @@ describe('event public API', () => {
       expect(frames[3]).toStrictEqual(expect.objectContaining({ file: 'http://x/d.js' }))
     })
 
+    it('parses anonymous async V8 frames with method "async"', () => {
+      const frames = stackOf('Error: boom\n    at async http://x/a.js:1:2\n    at async \t http://x/b.js:3:4')
+      expect(frames[0]).toStrictEqual(expect.objectContaining({
+        file: 'http://x/a.js', method: 'async', lineNumber: 1, columnNumber: 2
+      }))
+      expect(frames[1]).toStrictEqual(expect.objectContaining({
+        file: 'http://x/b.js', method: 'async', lineNumber: 3, columnNumber: 4
+      }))
+    })
+
+    it('leaves named async frames and async-like paths unchanged', () => {
+      const frames = stackOf('Error: boom\n    at async foo (http://x/a.js:1:2)\n    at http://x/async-utils.js:3:4\n    at asyncHandler (http://x/c.js:5:6)')
+      expect(frames[0]).toStrictEqual(expect.objectContaining({ file: 'http://x/a.js', method: 'async foo' }))
+      expect(frames[1]).toStrictEqual(expect.objectContaining({ file: 'http://x/async-utils.js' }))
+      expect(frames[1].method).toBeUndefined()
+      expect(frames[2]).toStrictEqual(expect.objectContaining({ file: 'http://x/c.js', method: 'asyncHandler' }))
+    })
+
     it('drops frames with no usable data', () => {
       const frames = stackOf('Error: boom\nnot a frame at all\n    at foo (http://x/a.js:1:2)')
       expect(frames).toHaveLength(1)

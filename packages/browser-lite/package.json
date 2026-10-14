@@ -1,6 +1,6 @@
 {
   "name": "@mrhenry/browser-lite",
-  "version": "9.0.0",
+  "version": "9.1.0",
   "main": "dist/bugsnag.js",
   "types": "types/bugsnag.d.ts",
   "description": "Bugsnag error reporter for browser JavaScript",

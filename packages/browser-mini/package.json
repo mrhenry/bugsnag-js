@@ -1,6 +1,6 @@
 {
   "name": "@mrhenry/browser-mini",
-  "version": "9.0.0",
+  "version": "9.1.0",
   "main": "dist/bugsnag.js",
   "module": "dist/bugsnag.js",
   "types": "types/bugsnag.d.ts",

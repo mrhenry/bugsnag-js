@@ -232,7 +232,9 @@ An event serialises (`Event.toJSON`) to:
 
 Each stack frame is `{ file, method, lineNumber, columnNumber, code, inProject }`.
 Frames with no usable data are dropped. `method` defaults to `global code` when
-a frame has a line number but no file/function.
+a frame has a line number but no file/function. An anonymous async V8 frame
+(`at async file:line:col`) reports `method: "async"` and keeps the file name
+clean; named async frames (`at async fn (...)`) keep their full method name.
 
 ### 8.1 Device fields
 

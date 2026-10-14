@@ -115,7 +115,11 @@ function parseStackLine (raw) {
     m = rest.match(/^(.*?)\s*\((.*):(\d+):(\d+)\)$/)
     if (m) return makeFrame(m[1] || undefined, m[2], m[3], m[4])
     m = rest.match(/^(.*):(\d+):(\d+)$/)
-    if (m) return makeFrame(undefined, m[1], m[2], m[3])
+    if (m) {
+      var anonymousAsync = m[1].match(/^async\s+(.*)$/)
+      if (anonymousAsync) return makeFrame('async', anonymousAsync[1], m[2], m[3])
+      return makeFrame(undefined, m[1], m[2], m[3])
+    }
     return makeFrame(rest, undefined, undefined, undefined)
   }
 
