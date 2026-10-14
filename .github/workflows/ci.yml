@@ -1,15 +1,7 @@
 name: CI
 
-# Runs every test that can run on GitHub-hosted runners for all packages:
-# linting, unit tests, type tests and the native (C/C++) lint.
-#
-# Deliberately *excluded* (see the comment at the bottom of this file for why):
-#   - the Maze Runner end-to-end suites (browser, node, react-native,
-#     react-native-cli, cloudflare-workers, expo and Electron integration)
-
 on:
   push:
-  pull_request:
 
 permissions:
   contents: read
