@@ -117,9 +117,7 @@
     "@inquirer/figures": "1.0.13",
     "brace-expansion": "2.1.4",
     "request": "npm:@cypress/request@^3.0.10",
-    "@jest-runner/electron": {
-      "form-data": "^4.0.6"
-    },
+    "form-data": "^4.0.6",
     "@types/babel__traverse": "7.17.1",
     "axios": "^1.15.1",
     "@types/express-serve-static-core": "4.19.6",
@@ -167,5 +165,8 @@
   },
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "volta": {
+    "node": "26.12.1"
+  }
 }
